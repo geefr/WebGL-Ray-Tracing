@@ -4,12 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "http-server ./"
   },
   "repository": {
     "type": "git",
     "url": "http://service-gitea:/geefr/web-tracing"
   },
   "author": "Gareth Francis <gfrancis.dev@gmail.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "math": "0.0.3"
+  }
 }

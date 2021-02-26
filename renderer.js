@@ -48,6 +48,11 @@ class Renderer {
     }
     gl.useProgram(this.quad_program);
 
+    // Uniform locations
+    this.quad_program_uni = {
+      iResolution:gl.getUniformLocation(this.quad_program, "iResolution")
+    };
+
     // Buffers
     this.quad_vao = gl.createVertexArray();
     gl.bindVertexArray(this.quad_vao);
@@ -66,6 +71,20 @@ class Renderer {
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(0);
 
+    let texCoords = new Float32Array([
+      0.0, 0.0,
+      1.0, 0.0,
+      1.0, 1.0,
+      1.0, 1.0,
+      0.0, 1.0,
+      0.0, 0.0
+    ]);
+    this.quad_vbo_texcoords = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.quad_vbo_texcoords);
+    gl.bufferData(gl.ARRAY_BUFFER, texCoords, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(1);
+
     this.initialised = true;
   }
 
@@ -78,6 +97,8 @@ class Renderer {
       return;
     }
 
+    // console.log(`${this.canvas.width}x${this.canvas.height}`);
+
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     // Set clear color to black, fully opaque
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
@@ -87,8 +108,14 @@ class Renderer {
     // Draw the ray traced stuff
     gl.bindVertexArray(this.quad_vao);
     gl.useProgram(this.quad_program);
+
+    this.update_uniforms();
     
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  update_uniforms = () => {
+    this.gl.uniform3f(this.quad_program_uni.iResolution, this.canvas.width, this.canvas.height, 0.0);
   }
 
 }

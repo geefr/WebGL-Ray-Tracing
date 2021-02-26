@@ -7,6 +7,7 @@ class Game {
 
   constructor(canvas) {
     this.renderer = new Renderer(canvas);
+    this.canvas = canvas;
     this.renderer.init();
 
     this.last_frame = Date.now();

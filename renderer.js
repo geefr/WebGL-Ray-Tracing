@@ -18,7 +18,10 @@ class Renderer {
 
   async init() {
     // Initialize the GL context
-    const gl = this.canvas.getContext("webgl2");
+    const gl = this.canvas.getContext("webgl2", {
+      antialias: true, // This may be a dumb idea for ray tracing :)
+      powerPreference: "high-performance"
+    });
     this.gl = gl;
     // Only continue if WebGL is available and working
     if (this.gl === null) {
@@ -100,6 +103,9 @@ class Renderer {
     this.primitives_ubo = gl.createBuffer();
     gl.bindBuffer(gl.UNIFORM_BUFFER, this.primitives_ubo);
     this.upload_ubo_0(this.quad_program_uni.ubo_primitives)
+
+    // Minor thing, but we don't need depth testing for full-screen ray tracing
+    gl.disable(gl.DEPTH_TEST);
 
     this.initialised = true;
   }

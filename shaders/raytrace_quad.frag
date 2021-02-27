@@ -87,7 +87,26 @@ struct Intersection {
 // Initialise a list of intersections to insane values
 void init_intersection( out Intersection intersection ) { intersection.i = 0; intersection.t = limit_inf; }
 void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {intersections[i].i = 0; intersections[i].t = limit_inf;}}
-// TODO: May need sorting functions for intersections
+Intersection[limit_in_per_ray_max] sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
+  // A simple insertion sort, nothing fancy
+  Intersection result[limit_in_per_ray_max];
+  for( int out_i = limit_in_per_ray_max - 1; out_i >= 0; out_i-- ) {
+    Intersection largest;
+    largest.t = - limit_float_max;
+    for( int in_i = limit_in_per_ray_max - 1; in_i >= 0; in_i-- ) {
+      Intersection current = intersections[in_i];
+      if( isinf(current.t) ) {
+        // It's the largest
+        largest = current;
+        break;
+      } else if ( current.t > largest.t ) {
+        largest = current;
+      }
+    }
+    result[out_i] = largest;
+  }
+  return result;
+}
 
 //// Ray functions
 // Determine which intersection is the 'hit' - Smallest non-negative t

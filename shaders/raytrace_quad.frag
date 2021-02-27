@@ -1,6 +1,6 @@
 #version 300 es
 
-precision mediump float;
+precision highp float;
 
 in vec3 fragPos;
 in vec2 vUV;
@@ -16,6 +16,8 @@ uniform vec3 iResolution;           // viewport resolution (in pixels)
 // uniform float     iSampleRate;           // sound sample rate (i.e., 44100)
 // uniform vec3      iChannelResolution[4]; // Resolution of input channels
 // uniform sampler2D iChannel0;             // Input channels (For audio in this case)
+
+uniform mat4 viewProjectionMatrix;
 
 // A primitive / object
 // - modelMatrix
@@ -82,6 +84,7 @@ struct Ray {
 struct Intersection {
   float t;     // Intersection distance (along current ray)
   int i;       // primitive index
+  bool inside; // true if intersection is within an object (Ray going from inside -> outside)
   vec4 pos;    // Intersection position
   vec4 eye;    // Intersection -> eye vector
   vec4 normal; // Intersection normal
@@ -152,9 +155,8 @@ int sphere_ray_intersect(int i, Ray ray, out Intersection[2] intersections) {
   float t1 = (-b - sqrt(discriminant)) / (2.0 * a);
   float t2 = (-b + sqrt(discriminant)) / (2.0 * a);
 
-
   intersections[0].i = i; intersections[1].i = i;
-  if( abs(t1 - t2) < limit_epsilon ) { intersections[0].t = intersections[1].t = t1; return 1; }
+  if( abs(t1 - t2) < limit_epsilon ) { intersections[0].t = t1; intersections[1].t = t2; return 1; }
   else if( t1 < t2 ) { intersections[0].t = t1; intersections[1].t = t2; return 2; }
   else if( t2 < t1 ) { intersections[0].t = t2; intersections[1].t = t1; return 2; }
 }
@@ -213,6 +215,14 @@ void compute_intersection_data( Ray r, out Intersection i ) {
     // An error. Hopefully this looks strange enough to trigger investigation :)
     i.normal = vec4(1.0, 0.0, 0.0, 0.0);
   }
+
+  // If the intersection is inside an object flip the normal
+  if( dot(i.normal, i.eye) < 0.0 ) {
+    i.normal = - i.normal;
+    i.inside = true;
+  } else {
+    i.inside = false;
+  }
 }
 
 void compute_intersection_data_first( Ray r, out Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
@@ -246,7 +256,7 @@ vec4 shade_phong( Intersection hit ) {
 
       // Specular component
       float s_e = dot(s, hit.eye);
-      if( s_e > 0.0 )
+      if( s_e >= 0.0 )
       {
         float f = pow(s_e, m.specular.w);
         shade += (m.specular * light.intensity * f);
@@ -260,28 +270,25 @@ vec4 shade_phong( Intersection hit ) {
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-vec4 background_color(in vec2 fragCoord) {
+vec4 background_color() {
   return vec4(0.8, 0.8, 0.8, 1.0);
-  // vec2 c = fragCoord.xy / iResolution.xy;
-  // return vec4(c.x, c.y, 1.0, 1.0);
 }
 
-void mainImage(out vec4 fragColor, in vec2 fragCoord) {
-  // -0.5 -> +0.5 x and y, not corrected for aspect
-  vec2 c = (fragCoord.xy / iResolution.xy) - 0.5;
+void main() {
+  // fragPos -1.0 -> 1.0, clip space
+  // vUV.st   0.0 -> 1.0
 
-  // Quick and dirty perspective hack for ray testing :O
-  // Let's assume the screen is a canvas, 0,0,z -> 2,2,z
-  float cz = 10.0;
-  c *= 2.0;
-  c.x = ((c.x) * (iResolution.x / iResolution.y));
-
-  // And the camera is at 0,0,0
-  vec4 eye = vec4(0,0,0,1);
+  // Our ray goes from the near plane, to the far plane
+  // fragPos is in clip space, so we can defined it there
+  // and then project back to world space
+  // TODO: This relies heavily on the projection matrix, and can have depth precision
+  // issues if values aren't chosen carefully. Would be better in the long run to replace this.
+  vec4 source = inverse(viewProjectionMatrix) * vec4(- fragPos.x, fragPos.y, -1.0, 1.0);
+  vec4 target = inverse(viewProjectionMatrix) * vec4(- fragPos.x, fragPos.y, 1.0, 1.0);
 
   Ray r;
-  r.origin = eye;
-  r.direction = normalize(vec4(c.xy, cz, 1.0) - eye);
+  r.origin = source;
+  r.direction = normalize(target - source);
 
   // All of the intersections on this ray
   Intersection intersections[limit_in_per_ray_max];
@@ -307,7 +314,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   Intersection hit;
   init_intersection(hit);
   if( !ray_hit(intersections, hit) ) {
-    fragColor = background_color(fragCoord);
+    fragColor = background_color();
     return;
   }
 
@@ -315,8 +322,5 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
 
   // And render
   fragColor = shade_phong( hit );
-}
 
-void main() {
-  mainImage(fragColor, vUV.st * iResolution.xy);
 }

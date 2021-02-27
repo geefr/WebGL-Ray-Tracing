@@ -94,6 +94,7 @@ class Renderer {
     // Uniform locations & buffers
     this.quad_program_uni = {
       iResolution:gl.getUniformLocation(this.quad_program, "iResolution"),
+      viewProjectionMatrix:gl.getUniformLocation(this.quad_program, "viewProjectionMatrix"),
       iNumPrimitives:gl.getUniformLocation(this.quad_program, "iNumPrimitives"),
       iNumMaterials:gl.getUniformLocation(this.quad_program, "iNumMaterials"),
       iNumLights:gl.getUniformLocation(this.quad_program, "iNumLights"),
@@ -106,6 +107,8 @@ class Renderer {
 
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
+
+    this.eyePos = [0.0, 10.0, -10.0, 1.0];
 
     this.initialised = true;
   }
@@ -126,30 +129,30 @@ class Renderer {
 
     this.lights = [];
     let l = new PointLight();
-    l.position = [-10.0, 5.0, 0.0, 1.0];
+    l.position = [0.0, 10.0, 0.0, 1.0];
     l.intensity = [1.0, 0.5, 0.5, 1.0];
     this.lights.push(l);
 
     l = new PointLight();
-    l.position = [10.0, 5.0, 0.0, 1.0];
+    l.position = [-10.0, 5.0, 0.0, 1.0];
     l.intensity = [0.5, 1.0, 0.5, 1.0];
     this.lights.push(l);
 
     l = new PointLight();
-    l.position = [0.0, -5.0, 0.0, 1.0];
+    l.position = [10.0, -5.0, 0.0, 1.0];
     l.intensity = [0.5, 0.5, 1.0, 1.0];
     this.lights.push(l);
 
     this.primitives = [];
     let p = new Sphere();
     p.set_material(0);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-0.75, 0.0, 8.0]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-5.0, 0.0, 0.0]);
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
     this.primitives.push(p);
 
     p = new Sphere();
     p.set_material(1);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.75, 0.0, 8.0]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [5.0, 0.0, 0.0]);
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
     this.primitives.push(p);
   }
@@ -278,7 +281,22 @@ class Renderer {
       return;
     }
 
-    // console.log(`${this.canvas.width}x${this.canvas.height}`);
+    // TODO: Don't hardcode these
+    this.projectionMatrix = glMatrix.mat4.create();
+    // You may think the near/far plane values here look a little weird, and you would be right.
+    // They have been chosed to avoid precision issues when transforming source/target positions
+    // from clip -> world space in the fragment shader.
+    // Alternate approach would be to not use a projection matrix, and do pixel-based calculations
+    // to work out an eye -> canvas ray (The ray tracing challenge p.102)
+    glMatrix.mat4.perspective(this.projectionMatrix, 45.0, this.canvas.width / this.canvas.height, 1.0, 1.1);
+    this.viewMatrix = glMatrix.mat4.create();
+
+    const eyeRot = 0.02;
+    let rotMat = glMatrix.mat4.create();
+    glMatrix.mat4.rotateY(rotMat, rotMat, eyeRot);
+    glMatrix.vec4.transformMat4(this.eyePos, this.eyePos, rotMat);
+
+    glMatrix.mat4.lookAt(this.viewMatrix, this.eyePos, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     // Set clear color to black, fully opaque
@@ -303,6 +321,16 @@ class Renderer {
     this.gl.uniform1i(this.quad_program_uni.iNumPrimitives, this.primitives.length);
     this.gl.uniform1i(this.quad_program_uni.iNumMaterials, this.materials.length);
     this.gl.uniform1i(this.quad_program_uni.iNumLights, this.lights.length);
+
+    let viewProjectionMatrix = this.projectionMatrix;
+    glMatrix.mat4.multiply(viewProjectionMatrix, viewProjectionMatrix, this.viewMatrix);
+    let vp = new Float32Array([
+      viewProjectionMatrix[0], viewProjectionMatrix[1], viewProjectionMatrix[2], viewProjectionMatrix[3],
+      viewProjectionMatrix[4], viewProjectionMatrix[5], viewProjectionMatrix[6], viewProjectionMatrix[7],
+      viewProjectionMatrix[8], viewProjectionMatrix[9], viewProjectionMatrix[10], viewProjectionMatrix[11],
+      viewProjectionMatrix[12], viewProjectionMatrix[13], viewProjectionMatrix[14], viewProjectionMatrix[15],
+    ]);
+    this.gl.uniformMatrix4fv(this.quad_program_uni.viewProjectionMatrix, false, vp);
   }
 
 }

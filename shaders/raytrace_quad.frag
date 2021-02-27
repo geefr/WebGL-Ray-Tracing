@@ -138,6 +138,21 @@ int sphere_ray_intersect(int i, Ray ray, out Intersection[2] intersections) {
   else if( t1 < t2 ) { intersections[0].t = t1; intersections[1].t = t2; return 2; }
   else if( t2 < t1 ) { intersections[0].t = t2; intersections[1].t = t1; return 2; }
 }
+
+// Surface normal for sphere at point p (on surface of sphere, in world space)
+vec4 sphere_normal(int i, vec4 p) {
+  mat4 m = primitives[i].modelMatrix;
+  vec4 pm = inverse(m) * p;
+  vec4 n = pm - vec4(0.0, 0.0, 0.0, 1.0);
+  // Technically should use sub(m,3,3), but zeroing w afterwards is easier
+  n = transpose(inverse(m)) * n; 
+  n.w = 0.0;
+  return normalize(n);
+}
+/////////////////////////////////////////////////////////////////////////////////////////////////
+// Shading functions
+vec4 vector_eye( Ray ray, Intersection intersection ) { return normalize(ray_to_position(ray, intersection.t) - ray.origin); }
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 vec4 background_color(in vec2 fragCoord) {
@@ -189,8 +204,15 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   }
 
   // And render
-  float v = hit.t - 7.5;
-  fragColor = vec4(v,0.0,0.0, 1.0);
+  vec4 p = ray_to_position( r, hit.t );
+  vec4 n = sphere_normal( hit.i, p );
+
+  float v = acos(dot(n, vec4(0.0, 1.0, 0.0, 0.0))) / 3.0;
+
+  fragColor = vec4(v, 0.0, 0.0, 1.0);
+
+  //float v = hit.t - 7.5;
+  //fragColor = vec4(v,0.0,0.0, 1.0);
 }
 
 void main() {

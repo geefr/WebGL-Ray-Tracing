@@ -36,7 +36,7 @@ uniform int iNumPrimitives;
 // This block only contains the primitives, to simplify the buffer upload in js
 layout (std140) uniform ubo_primitives
 {
-  Primitive primitives[1];
+  Primitive primitives[100];
 };
 
 out vec4 fragColor;

@@ -27,6 +27,15 @@ class Renderer {
     this.primitives = [
       new Sphere()
     ];
+    let a = new Primitive();
+    a.set_type(2.1);
+    this.primitives.push(a);
+    a = new Primitive();
+    a.set_type(3.4);
+    this.primitives.push(a);
+    a = new Primitive();
+    a.set_type(4);
+    this.primitives.push(a);
 
     // Shaders
     const fs_source = await this.fetchFile("shaders/raytrace_quad.frag");
@@ -88,23 +97,25 @@ class Renderer {
     gl.enableVertexAttribArray(1);
 
     // Uniform locations & buffers
-    this.primitives_ubo = gl.createBuffer();
-    gl.bindBuffer(gl.UNIFORM_BUFFER, this.primitives_ubo);
-    gl.bufferData(gl.UNIFORM_BUFFER, this.pack_primitives_buffer, gl.STATIC_DRAW);
-
     this.quad_program_uni = {
       iResolution:gl.getUniformLocation(this.quad_program, "iResolution"),
       iNumPrimitives:gl.getUniformLocation(this.quad_program, "iNumPrimitives"),
       ubo_primitives:gl.getUniformBlockIndex(this.quad_program, "ubo_primitives")
     };
 
+    this.primitives_ubo = gl.createBuffer();
+    gl.bindBuffer(gl.UNIFORM_BUFFER, this.primitives_ubo);
+    this.upload_primitives_buffer(this.quad_program_uni.ubo_primitives)
+
     this.initialised = true;
   }
 
-  pack_primitives_buffer = () => {
+  upload_primitives_buffer = (blockIndex) => {
     // Iterate over the primitives and pack their data into
-    // buffers
-    // Be very careful here vs the ubo format
+    // the UBO. Method must be called with UBO currently bound
+    // to UNIFORM_BUFFER, and shader program bound.
+    // TODO: This is ugly as all heck
+    //
     // struct Primitive {
     //   mat4 modelMatrix;
     //   vec4 meta;
@@ -112,19 +123,27 @@ class Renderer {
     //   vec4 unused2;
     //   vec4 unused3;
     // };
-    // // This block only contains the primitives, to simplify the buffer upload in js
+    //
     // layout (std140) uniform ubo_primitives
     // {
     //   Primitive primitives[100];
     // };
     
-    // Buffer size must match primitive array in shader
-    const num_floats = 1 * 32;
-    let data = new Float32Array(num_floats);
+    // Get the buffer size
+    let ubo_size = this.gl.getActiveUniformBlockParameter(
+      this.quad_program, blockIndex, this.gl.UNIFORM_BLOCK_DATA_SIZE)
 
+    // Buffer size must match primitive array in shader
+    let data = new Float32Array(ubo_size / 4);
+    
     const num_prims = this.primitives.length;
-    for(i = 0; i < num_prims; i++) {
-      offset = i * 32;
+    for(let i = 0; i < num_prims; i++) {
+      let offset = i * 32;
+      if( offset > (data.length - 32)) {
+        console.error("UBO Overflow - Some primitives won't be displayed");
+        break;
+      }
+
       let p = this.primitives[i];
       // model matrix
       data[offset++] = p.modelMatrix[0];
@@ -147,7 +166,8 @@ class Renderer {
       data[offset++] = p.get_type();
       // Rest unused
     }
-    return data;
+    
+    this.gl.bufferData(this.gl.UNIFORM_BUFFER, data, this.gl.DYNAMIC_DRAW);
   }
 
   render = () => {
@@ -170,8 +190,9 @@ class Renderer {
     // Draw the ray traced stuff
     gl.useProgram(this.quad_program);
     gl.bindVertexArray(this.quad_vao);
-    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.primitives_ubo);
+
     gl.uniformBlockBinding(this.quad_program, this.quad_program_uni.primitives_ubo, 0);
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.primitives_ubo);
 
     this.update_uniforms();
     

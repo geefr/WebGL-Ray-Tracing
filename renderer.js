@@ -25,7 +25,7 @@ class Renderer {
     }
 
     // The Scene
-    create_primitives();
+    this.create_primitives();
 
     // Shaders
     const fs_source = await this.fetchFile("shaders/raytrace_quad.frag");
@@ -104,8 +104,8 @@ class Renderer {
     this.primitives = [
     ];
     let p = new Sphere();
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.5, 0.5, 0.0]);
-    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.25, 0.25, 0.25]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 8.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [1.0, 1.0, 1.0]);
     this.primitives.push(p);
   }
 

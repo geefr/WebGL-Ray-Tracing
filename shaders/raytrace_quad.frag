@@ -17,27 +17,47 @@ uniform vec3 iResolution;           // viewport resolution (in pixels)
 // uniform vec3      iChannelResolution[4]; // Resolution of input channels
 // uniform sampler2D iChannel0;             // Input channels (For audio in this case)
 
-// A primitive in the space
-// modelMatrix
-// meta.x - The type
-// 1 - Sphere, at 0,0,0, radius = 1
-// meta.yzw - Unused for now
+// A primitive / object
+// - modelMatrix
+// - meta.x - The type
+//   - 1 - Sphere, at 0,0,0, radius = 1
+// - meta.y - Material index from ubo_0.materials
+// 
+// meta.zw - Unused for now
 // Primitive intentionally only uses floats here, to simplify the buffer upload in js
 // Try not to go over 16 KB of ubo - For (older?) intel chips
 struct Primitive {
   mat4 modelMatrix;
   vec4 meta;
-  vec4 unused1;
-  vec4 unused2;
-  vec4 unused3;
+  vec4 pad1;
+  vec4 pad2;
+  vec4 pad3;
+};
+
+struct Light {
+  vec4 intensity;  // rgb_
+  vec4 position;   // xyz1 (TODO: Support for directional lights)
+  vec4 pad1;
+  vec4 pad2;
+};
+
+struct Material {
+  vec4 ambient;    // rgb_
+  vec4 diffuse;    // rgb_
+  vec4 specular;   // rgbs, s=shininess
+  vec4 pad1;
 };
 
 uniform int iNumPrimitives;
+uniform int iNumMaterials;
+uniform int iNumLights;
 // This block only contains the primitives, to simplify the buffer upload in js
-layout (std140) uniform ubo_primitives
+layout (std140) uniform ubo_0
 {
-  Primitive primitives[100];
-};
+  Light lights[10];
+  Material materials[10];
+  Primitive primitives[40];
+} ;
 
 out vec4 fragColor;
 

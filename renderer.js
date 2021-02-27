@@ -1,5 +1,7 @@
 import Primitive from './primitives/primitive.js'
 import Sphere from './primitives/sphere.js'
+import PointLight from './primitives/pointlight.js'
+import Material from './primitives/material.js'
 import * as glMatrix from './modules/gl-matrix-2.8.1/lib/gl-matrix.js'
 
 class Renderer {
@@ -90,26 +92,40 @@ class Renderer {
     this.quad_program_uni = {
       iResolution:gl.getUniformLocation(this.quad_program, "iResolution"),
       iNumPrimitives:gl.getUniformLocation(this.quad_program, "iNumPrimitives"),
-      ubo_primitives:gl.getUniformBlockIndex(this.quad_program, "ubo_primitives")
+      iNumMaterials:gl.getUniformLocation(this.quad_program, "iNumMaterials"),
+      iNumLights:gl.getUniformLocation(this.quad_program, "iNumLights"),
+      ubo_primitives:gl.getUniformBlockIndex(this.quad_program, "ubo_0")
     };
 
     this.primitives_ubo = gl.createBuffer();
     gl.bindBuffer(gl.UNIFORM_BUFFER, this.primitives_ubo);
-    this.upload_primitives_buffer(this.quad_program_uni.ubo_primitives)
+    this.upload_ubo_0(this.quad_program_uni.ubo_primitives)
 
     this.initialised = true;
   }
 
   create_primitives = () => {
+    this.materials = [];
+    let m = new Material();
+    let baseColour = [0.7, 0.2, 0.7, 1.0];
+    glMatrix.vec4.multiply(m.ambient, m.ambient, baseColour);
+    glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
+    this.materials.push(m);
+
+    this.lights = [];
+    let l = new PointLight();
+    l.position = [0.0, 100.0, 0.0, 1.0];
+    this.lights.push(l);
+
     this.primitives = [
     ];
     let p = new Sphere();
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 8.0]);
-    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5, 0.5]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
     this.primitives.push(p);
   }
 
-  upload_primitives_buffer = (blockIndex) => {
+  upload_ubo_0 = (blockIndex) => {
     // Iterate over the primitives and pack their data into
     // the UBO. Method must be called with UBO currently bound
     // to UNIFORM_BUFFER, and shader program bound.
@@ -118,33 +134,86 @@ class Renderer {
     // struct Primitive {
     //   mat4 modelMatrix;
     //   vec4 meta;
-    //   vec4 unused1;
-    //   vec4 unused2;
-    //   vec4 unused3;
+    //   vec4 pad1;
+    //   vec4 pad2;
+    //   vec4 pad3;
+    // };
+    
+    // struct Light {
+    //   vec4 intensity;  // rgb_
+    //   vec4 position;   // xyz1 (TODO: Support for directional lights)
+    //   vec4 pad1;
+    //   vec4 pad2;
+    // };
+    
+    // struct Material {
+    //   vec4 ambient;    // rgb_
+    //   vec4 diffuse;    // rgb_
+    //   vec4 specular;   // rgbs, s=shininess
+    //   vec4 pad1;
     // };
     //
-    // layout (std140) uniform ubo_primitives
+    // layout (std140) uniform ubo_0
     // {
-    //   Primitive primitives[100];
+    //   Light lights[10];
+    //   Material materials[10];
+    //   Primitive primitives[40];
     // };
     
-    // Get the buffer size
+    // Get the buffer size + offsets
     let ubo_size = this.gl.getActiveUniformBlockParameter(
       this.quad_program, blockIndex, this.gl.UNIFORM_BLOCK_DATA_SIZE)
-
-    // Buffer size must match primitive array in shader
     let data = new Float32Array(ubo_size / 4);
-    
+
+    // Size and offsets in floats
+    // The structure padding is excessive/paranoid here, but allows for future expansion
+    const light_size = 16;
+    const material_size = 16;
+    const primitive_size = 32;
+
+    const lights_offset = 0;
+    const materials_offset = 10 * light_size;
+    const primitives_offset = materials_offset + (10 * material_size);
+
+    for(let i = 0; i < this.lights.length; i++) {
+      let offset = lights_offset + (i * light_size);
+      let l = this.lights[i];
+      data[offset++] = l.intensity[0];
+      data[offset++] = l.intensity[1];
+      data[offset++] = l.intensity[2];
+      data[offset++] = l.intensity[3];
+
+      data[offset++] = l.position[0];
+      data[offset++] = l.position[1];
+      data[offset++] = l.position[2];
+      data[offset++] = l.position[3];
+    }
+
+    for(let i = 0; i < this.materials.length; i++) {
+      let offset = materials_offset + (i * material_size);
+      let m = this.materials[i];
+
+      data[offset++] = m.ambient[0];
+      data[offset++] = m.ambient[1];
+      data[offset++] = m.ambient[2];
+      data[offset++] = m.ambient[3];
+
+      data[offset++] = m.diffuse[0];
+      data[offset++] = m.diffuse[1];
+      data[offset++] = m.diffuse[2];
+      data[offset++] = m.diffuse[3];
+
+      data[offset++] = m.specular[0];
+      data[offset++] = m.specular[1];
+      data[offset++] = m.specular[2];
+      data[offset++] = m.specular[3];
+    }
+
     const num_prims = this.primitives.length;
     for(let i = 0; i < num_prims; i++) {
-      let offset = i * 32;
-      if( offset > (data.length - 32)) {
-        console.error("UBO Overflow - Some primitives won't be displayed");
-        break;
-      }
-
+      let offset = primitives_offset + (i * primitive_size);
       let p = this.primitives[i];
-      // model matrix
+      
       data[offset++] = p.modelMatrix[0];
       data[offset++] = p.modelMatrix[1];
       data[offset++] = p.modelMatrix[2];
@@ -161,9 +230,11 @@ class Renderer {
       data[offset++] = p.modelMatrix[13];
       data[offset++] = p.modelMatrix[14];
       data[offset++] = p.modelMatrix[15];
-      // meta
-      data[offset++] = p.get_type();
-      // Rest unused
+      
+      data[offset++] = p.meta[0];
+      data[offset++] = p.meta[1];
+      data[offset++] = p.meta[2];
+      data[offset++] = p.meta[3];
     }
     
     this.gl.bufferData(this.gl.UNIFORM_BUFFER, data, this.gl.DYNAMIC_DRAW);
@@ -201,6 +272,8 @@ class Renderer {
   update_uniforms = () => {
     this.gl.uniform3f(this.quad_program_uni.iResolution, this.canvas.width, this.canvas.height, 0.0);
     this.gl.uniform1i(this.quad_program_uni.iNumPrimitives, this.primitives.length);
+    this.gl.uniform1i(this.quad_program_uni.iNumMaterials, this.materials.length);
+    this.gl.uniform1i(this.quad_program_uni.iNumLights, this.lights.length);
   }
 
 }

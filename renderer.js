@@ -1,5 +1,6 @@
 import Primitive from './primitives/primitive.js'
 import Sphere from './primitives/sphere.js'
+import * as glMatrix from './modules/gl-matrix-2.8.1/lib/gl-matrix.js'
 
 class Renderer {
   constructor(canvas) {
@@ -24,18 +25,7 @@ class Renderer {
     }
 
     // The Scene
-    this.primitives = [
-      new Sphere()
-    ];
-    let a = new Primitive();
-    a.set_type(2.1);
-    this.primitives.push(a);
-    a = new Primitive();
-    a.set_type(3.4);
-    this.primitives.push(a);
-    a = new Primitive();
-    a.set_type(4);
-    this.primitives.push(a);
+    create_primitives();
 
     // Shaders
     const fs_source = await this.fetchFile("shaders/raytrace_quad.frag");
@@ -108,6 +98,15 @@ class Renderer {
     this.upload_primitives_buffer(this.quad_program_uni.ubo_primitives)
 
     this.initialised = true;
+  }
+
+  create_primitives = () => {
+    this.primitives = [
+    ];
+    let p = new Sphere();
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.5, 0.5, 0.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.25, 0.25, 0.25]);
+    this.primitives.push(p);
   }
 
   upload_primitives_buffer = (blockIndex) => {

@@ -41,17 +41,23 @@ layout (std140) uniform ubo_primitives
 
 out vec4 fragColor;
 
+bool is_sphere(int i) { return primitives[i].meta.x == 1.0; }
+vec3 sphere_origin(int i) { return (primitives[i].modelMatrix * vec4(vec3(0.0),1.0)).xyz; }
+float sphere_radius(int i) { return (primitives[i].modelMatrix * vec4(1.0, 0.0, 0.0, 0.0)).x; }
+
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   // 0.0 -> 1.0 x and y, not corrected for aspect
   vec2 c = fragCoord.xy / iResolution.xy;
 
-  if( distance(vec2(0.5, 0.5), c.xy) < 0.2)
-  {
-    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+  if( is_sphere(0) ) {
+    if( distance(c, sphere_origin(0).xy) < sphere_radius(0) ) {
+      fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    } else {
+      fragColor = vec4(c.x, c.y, 1.0, 1.0);
+    }
   }
-  else
-  {
-    fragColor = vec4(c.x, c.y, 1.0, 1.0);
+  else {
+    fragColor = vec4(1.0, 0.0, 0.0, 1.0);
   }
 }
 

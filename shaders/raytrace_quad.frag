@@ -68,8 +68,8 @@ out vec4 fragColor;
 //// Limits and constants
 // The maximum number of intersections for a single ray (Because glsl can't have dynamic arrays)
 const int limit_in_per_ray_max = 10;
-const float limit_inf = 1.0 / 0.0; // Ignore the warning here
-const float limit_float_max = 1e20;
+const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
+const float limit_float_max = 1e19;
 const float limit_epsilon = 1e-6;
 
 //// Data Types (That aren't uniforms)
@@ -97,7 +97,7 @@ bool ray_hit( Intersection[limit_in_per_ray_max] intersections, out Intersection
   bool result = false;
   for( int i = 0; i < limit_in_per_ray_max; i++ ) {
     Intersection intersection = intersections[i];
-    if( isinf(intersection.t) ) {
+    if( intersection.t == limit_inf ) {
       // TODO: PERF: Maybe break on first inf? Requires intersections to be packed at beginning of array
       continue;
     }
@@ -190,7 +190,7 @@ Intersection[limit_in_per_ray_max] sort_intersections( Intersection[limit_in_per
     largest.t = - limit_float_max;
     for( int in_i = limit_in_per_ray_max - 1; in_i >= 0; in_i-- ) {
       Intersection current = intersections[in_i];
-      if( isinf(current.t) ) {
+      if( current.t == limit_inf ) {
         // It's the largest
         largest = current;
         break;

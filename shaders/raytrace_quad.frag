@@ -115,10 +115,7 @@ float sphere_radius(int i) { return (primitives[i].modelMatrix * vec4(1.0, 0.0, 
 // wiki/Line-sphere_intersection
 int sphere_ray_intersect(int i, Ray ray, out Intersection[2] intersections) {
   // pull ray into model space, rest of calculation is for sphere(o=0,0,0 r=1)
-  // Ray r = ray_tf_world_to_model(ray, primitives[i].modelMatrix);
-  Ray r;
-  r.origin = vec4(0.0, 0.0, 10.0, 1.0);
-  r.direction = vec4(0.0, 0.0, 1.0, 0.0);
+  Ray r = ray_tf_world_to_model(ray, primitives[i].modelMatrix);
 
   // Calculate Determinant - If negative it's a miss
   vec4 sphere_to_ray = r.origin - vec4(0.0, 0.0, 0.0, 1.0);
@@ -175,19 +172,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     if( is_sphere(i) ) {
       Intersection sphere_intersections[2];
       int ints = sphere_ray_intersect(i, r, sphere_intersections);
- 
-      if( ints == 0 ) {
-        fragColor = vec4(1.0, 0.0, 0.0, 1.0);
-        return;
-      }
-      if( ints == 1 ) {
-        fragColor = vec4(0.0, 1.0, 0.0, 1.0);
-        return;
-      }
-      if( ints == 2 ) {
-        fragColor = vec4(0.0, 0.0, 1.0, 1.0);
-        return;
-      }
 
       for( int j = 0; j < ints; j++ ) {
         intersections[intersections_insert] = sphere_intersections[j];
@@ -205,7 +189,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   }
 
   // And render
-  fragColor = vec4(hit.t, hit.t, hit.t, 1.0);
+  float v = hit.t - 7.5;
+  fragColor = vec4(v,0.0,0.0, 1.0);
 }
 
 void main() {

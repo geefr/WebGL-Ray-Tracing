@@ -105,7 +105,7 @@ class Renderer {
     ];
     let p = new Sphere();
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 8.0]);
-    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [1.0, 1.0, 1.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5, 0.5]);
     this.primitives.push(p);
   }
 

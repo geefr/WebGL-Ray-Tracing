@@ -21,6 +21,7 @@ uniform vec3 iResolution;           // viewport resolution (in pixels)
 // - modelMatrix
 // - meta.x - The type
 //   - 1 - Sphere, at 0,0,0, radius = 1
+//   - If more types added update compute_intersection_data, mainImage, and any other places is_sphere is called
 // - meta.y - Material index from ubo_0.materials
 // 
 // meta.zw - Unused for now
@@ -79,34 +80,12 @@ struct Ray {
 // An intersection between a ray and primitive(i) at (t)
 // (The closest of a set of intersections is referred to as the 'hit')
 struct Intersection {
-  float t;
-  int i;
+  float t;     // Intersection distance (along current ray)
+  int i;       // primitive index
+  vec4 pos;    // Intersection position
+  vec4 eye;    // Intersection -> eye vector
+  vec4 normal; // Intersection normal
 };
-
-//// Utility functions
-// Initialise a list of intersections to insane values
-void init_intersection( out Intersection intersection ) { intersection.i = 0; intersection.t = limit_inf; }
-void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {intersections[i].i = 0; intersections[i].t = limit_inf;}}
-Intersection[limit_in_per_ray_max] sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
-  // A simple insertion sort, nothing fancy
-  Intersection result[limit_in_per_ray_max];
-  for( int out_i = limit_in_per_ray_max - 1; out_i >= 0; out_i-- ) {
-    Intersection largest;
-    largest.t = - limit_float_max;
-    for( int in_i = limit_in_per_ray_max - 1; in_i >= 0; in_i-- ) {
-      Intersection current = intersections[in_i];
-      if( isinf(current.t) ) {
-        // It's the largest
-        largest = current;
-        break;
-      } else if ( current.t > largest.t ) {
-        largest = current;
-      }
-    }
-    result[out_i] = largest;
-  }
-  return result;
-}
 
 //// Ray functions
 // Determine which intersection is the 'hit' - Smallest non-negative t
@@ -129,7 +108,6 @@ bool ray_hit( Intersection[limit_in_per_ray_max] intersections, out Intersection
   }
   return result;
 }
-
 vec4 ray_to_position(Ray r, float t) { return r.origin + (r.direction * t); }
 
 Ray ray_tf_world_to_model(Ray r, mat4 modelMatrix) { 
@@ -192,48 +170,86 @@ vec4 sphere_normal(int i, vec4 p) {
   return normalize(n);
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////
-// Shading functions
+//// Utility functions
+// Common vector calculations
 vec4 vector_eye( vec4 p, vec4 eye ) { return normalize(eye - p); }
-vec4 vector_incident( vec4 p, Light l ) { return normalize(l.position - p); }
-vec4 vector_subsequent( vec4 i, vec4 n ) { return normalize(reflect(-i, n)); }
+vec4 vector_light( vec4 p, Light l ) { return normalize(l.position - p); }
+vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n)); }
 
-vec4 shade_phong( Ray r, Intersection hit, vec4 eyePos ) {
+// Initialise intersections to insane values (t=inf)
+void init_intersection( out Intersection intersection ) { intersection.i = 0; intersection.t = limit_inf; }
+void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {intersections[i].i = 0; intersections[i].t = limit_inf;}}
+// Sort array of intersections by t, ascending
+Intersection[limit_in_per_ray_max] sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
+  // A simple insertion sort, nothing fancy
+  Intersection result[limit_in_per_ray_max];
+  for( int out_i = limit_in_per_ray_max - 1; out_i >= 0; out_i-- ) {
+    Intersection largest;
+    largest.t = - limit_float_max;
+    for( int in_i = limit_in_per_ray_max - 1; in_i >= 0; in_i-- ) {
+      Intersection current = intersections[in_i];
+      if( isinf(current.t) ) {
+        // It's the largest
+        largest = current;
+        break;
+      } else if ( current.t > largest.t ) {
+        largest = current;
+      }
+    }
+    result[out_i] = largest;
+  }
+  return result;
+}
+// Pre-compute common vectors used during shading
+// Unless this has been called an intersection's data for these will be undefined
+void compute_intersection_data( Ray r, out Intersection i ) {
+  i.pos = ray_to_position(r, i.t);
+  i.eye = vector_eye(i.pos, r.origin);
+
+  if( is_sphere(i.i) ) {
+    i.normal = sphere_normal(i.i, i.pos);
+  }
+  else {
+    // An error. Hopefully this looks strange enough to trigger investigation :)
+    i.normal = vec4(1.0, 0.0, 0.0, 0.0);
+  }
+}
+
+void compute_intersection_data_first( Ray r, out Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
+void compute_intersection_data_all( Ray r, out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+// Shading functions
+vec4 shade_phong( Intersection hit ) {
   // Phong model, calculated in world space
   Material m = primitive_material(hit.i);
 
-  // Hit position
-  vec4 p = ray_to_position( r, hit.t );
-  // p -> eye
-  vec4 e = vector_eye( p, eyePos );
-  // surface normal
-  vec4 n = sphere_normal( hit.i, p );
-
   vec4 shade = vec4(0.0);
   for( int il = 0; il < iNumLights; il++ ) {
-    Light l = lights[il];
+    Light light = lights[il];
 
     // Incident vector, p -> light
-    vec4 i = vector_incident(p, l);
+    vec4 i = vector_light(hit.pos, light);
     // Subsequent vector, reflection of i
-    vec4 s = vector_subsequent(i, n);
+    vec4 s = vector_light_reflected(i, hit.normal);
 
     // Ambient component
-    shade += (m.ambient * l.intensity);
+    shade += (m.ambient * light.intensity);
 
     // Angle between light and surface normal
-    float i_n = dot(i, n);
+    float i_n = dot(i, hit.normal);
     if( i_n < 0.0 ) {
       // Light is behind the surface, diffuse & specular == 0
     } else {
       // Diffuse component
-      shade += (m.diffuse * l.intensity * i_n);
+      shade += (m.diffuse * light.intensity * i_n);
 
       // Specular component
-      float s_e = dot(s, e);
+      float s_e = dot(s, hit.eye);
       if( s_e > 0.0 )
       {
         float f = pow(s_e, m.specular.w);
-        shade += (m.specular * l.intensity * f);
+        shade += (m.specular * light.intensity * f);
       }
     }
    }
@@ -242,7 +258,6 @@ vec4 shade_phong( Ray r, Intersection hit, vec4 eyePos ) {
   shade.a = 1.0;
   return shade;
 }
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 vec4 background_color(in vec2 fragCoord) {
@@ -286,6 +301,8 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     }
   }
 
+  sort_intersections( intersections );
+
   // Work out the hit
   Intersection hit;
   init_intersection(hit);
@@ -294,8 +311,10 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     return;
   }
 
+  compute_intersection_data(r, hit);
+
   // And render
-  fragColor = shade_phong( r, hit, eye );
+  fragColor = shade_phong( hit );
 }
 
 void main() {

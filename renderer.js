@@ -112,15 +112,38 @@ class Renderer {
     glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
     this.materials.push(m);
 
+    m = new Material();
+    baseColour = [0.2, 0.7, 0.2, 1.0];
+    glMatrix.vec4.multiply(m.ambient, m.ambient, baseColour);
+    glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
+    this.materials.push(m);
+
     this.lights = [];
     let l = new PointLight();
-    l.position = [0.0, 100.0, 0.0, 1.0];
+    l.position = [-10.0, 5.0, 0.0, 1.0];
+    l.intensity = [1.0, 0.5, 0.5, 1.0];
     this.lights.push(l);
 
-    this.primitives = [
-    ];
+    l = new PointLight();
+    l.position = [10.0, 5.0, 0.0, 1.0];
+    l.intensity = [0.5, 1.0, 0.5, 1.0];
+    this.lights.push(l);
+
+    l = new PointLight();
+    l.position = [0.0, -5.0, 0.0, 1.0];
+    l.intensity = [0.5, 0.5, 1.0, 1.0];
+    this.lights.push(l);
+
+    this.primitives = [];
     let p = new Sphere();
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 8.0]);
+    p.set_material(0);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-0.75, 0.0, 8.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
+    this.primitives.push(p);
+
+    p = new Sphere();
+    p.set_material(1);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.75, 0.0, 8.0]);
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
     this.primitives.push(p);
   }

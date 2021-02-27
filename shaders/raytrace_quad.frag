@@ -124,6 +124,9 @@ Ray ray_tf_world_to_model(Ray r, mat4 modelMatrix) {
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Primitive Functions - Utility methods for primitive, plus intersections
+Material primitive_material(int i) { return materials[int(primitives[i].meta.y)]; }
+/////////////////////////////////////////////////////////////////////////////////////////////////
+// Sphere functions
 bool is_sphere(int i) { return primitives[i].meta.x == 1.0; }
 vec3 sphere_origin(int i) { return (primitives[i].modelMatrix * vec4(vec3(0.0),1.0)).xyz; }
 float sphere_radius(int i) { return (primitives[i].modelMatrix * vec4(1.0, 0.0, 0.0, 0.0)).x; }
@@ -171,13 +174,62 @@ vec4 sphere_normal(int i, vec4 p) {
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Shading functions
-vec4 vector_eye( Ray ray, Intersection intersection ) { return normalize(ray_to_position(ray, intersection.t) - ray.origin); }
+vec4 vector_eye( vec4 p, vec4 eye ) { return normalize(eye - p); }
+vec4 vector_incident( vec4 p, Light l ) { return normalize(l.position - p); }
+vec4 vector_subsequent( vec4 i, vec4 n ) { return normalize(reflect(-i, n)); }
+
+vec4 shade_phong( Ray r, Intersection hit, vec4 eyePos ) {
+  // Phong model, calculated in world space
+  Material m = primitive_material(hit.i);
+
+  // Hit position
+  vec4 p = ray_to_position( r, hit.t );
+  // p -> eye
+  vec4 e = vector_eye( p, eyePos );
+  // surface normal
+  vec4 n = sphere_normal( hit.i, p );
+
+  vec4 shade = vec4(0.0);
+  for( int il = 0; il < iNumLights; il++ ) {
+    Light l = lights[il];
+
+    // Incident vector, p -> light
+    vec4 i = vector_incident(p, l);
+    // Subsequent vector, reflection of i
+    vec4 s = vector_subsequent(i, n);
+
+    // Ambient component
+    shade += (m.ambient * l.intensity);
+
+    // Angle between light and surface normal
+    float i_n = dot(i, n);
+    if( i_n < 0.0 ) {
+      // Light is behind the surface, diffuse & specular == 0
+    } else {
+      // Diffuse component
+      shade += (m.diffuse * l.intensity * i_n);
+
+      // Specular component
+      float s_e = dot(s, e);
+      if( s_e > 0.0 )
+      {
+        float f = pow(s_e, m.specular.w);
+        shade += (m.specular * l.intensity * f);
+      }
+    }
+   }
+
+  shade = shade / float(iNumLights);
+  shade.a = 1.0;
+  return shade;
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 vec4 background_color(in vec2 fragCoord) {
-  vec2 c = fragCoord.xy / iResolution.xy;
-  return vec4(c.x, c.y, 1.0, 1.0);
+  return vec4(0.8, 0.8, 0.8, 1.0);
+  // vec2 c = fragCoord.xy / iResolution.xy;
+  // return vec4(c.x, c.y, 1.0, 1.0);
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -224,15 +276,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   }
 
   // And render
-  vec4 p = ray_to_position( r, hit.t );
-  vec4 n = sphere_normal( hit.i, p );
-
-  float v = acos(dot(n, vec4(0.0, 1.0, 0.0, 0.0))) / 3.0;
-
-  fragColor = vec4(v, 0.0, 0.0, 1.0);
-
-  //float v = hit.t - 7.5;
-  //fragColor = vec4(v,0.0,0.0, 1.0);
+  fragColor = shade_phong( r, hit, eye );
 }
 
 void main() {

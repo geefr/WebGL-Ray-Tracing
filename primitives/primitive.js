@@ -20,11 +20,13 @@ class Primitive {
     this.meta = glMatrix.vec4.create();
   }
 
-  set_type = (t) => {
-    this.meta[0] = t;
-  }
-
+  // Type of the primitive - should be defined by sub-classes
+  set_type = (t) => { this.meta[0] = t; }
   get_type = () => { return this.meta[0]; }
+
+  // The material index in Renderer.materials array
+  set_material = (i) => { this.meta[1] = i; }
+  get_material = () => { return this.meta[1]; }
 }
 
 export default Primitive;

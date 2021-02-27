@@ -18,24 +18,26 @@ uniform vec3 iResolution;           // viewport resolution (in pixels)
 // uniform sampler2D iChannel0;             // Input channels (For audio in this case)
 
 // A primitive in the space
+// modelMatrix
 // meta.x - The type
 // 1 - Sphere, at 0,0,0, radius = 1
-// modelMatrix
-
-
-blah blah blah blah
-
-This bit should be done with a ubo - we'll have lots of em
-
+// meta.yzw - Unused for now
+// Primitive intentionally only uses floats here, to simplify the buffer upload in js
+// Try not to go over 16 KB of ubo - For (older?) intel chips
 struct Primitive {
-  ivec4 meta;
   mat4 modelMatrix;
-  vec4 reserved1;
-  vec4 reserved2;
+  vec4 meta;
+  vec4 unused1;
+  vec4 unused2;
+  vec4 unused3;
 };
 
 uniform int iNumPrimitives;
-uniform Primitive[100] primitives;
+// This block only contains the primitives, to simplify the buffer upload in js
+layout (std140) uniform ubo_primitives
+{
+  Primitive primitives[1];
+};
 
 out vec4 fragColor;
 

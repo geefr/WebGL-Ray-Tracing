@@ -1,4 +1,4 @@
-import * as math from 'math';
+import * as glMatrix from '../modules/gl-matrix-2.8.1/lib/gl-matrix.js'
 
 /*
 // A primitive in the space
@@ -15,16 +15,16 @@ struct Primitive {
 
 class Primitive {
   constructor() {
-    this.meta = [0, 0, 0, 0];
-    this.modelMatrix = math.identity(4);
-    this.reserved1 = [0.0, 0.0, 0.0, 0.0];
-    this.reserved2 = [0.0, 0.0, 0.0, 0.0];
+    this.type = 0.0;
+    this.modelMatrix = glMatrix.mat4.create();
+    this.meta = glMatrix.vec4.create();
   }
 
   set_type = (t) => {
     this.meta[0] = t;
   }
 
+  get_type = () => { return this.meta[0]; }
 }
 
 export default Primitive;

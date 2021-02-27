@@ -1,0 +1,13 @@
+{
+  "env": {
+    "development": {
+      "presets": ["env"]
+    },
+    "production": {
+      "presets": ["env"]
+    },
+    "esm": {
+      "presets": [["env", { "modules": false }]]
+    }
+  }
+}

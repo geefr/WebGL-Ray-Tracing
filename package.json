@@ -12,7 +12,5 @@
   },
   "author": "Gareth Francis <gfrancis.dev@gmail.com>",
   "license": "MIT",
-  "dependencies": {
-    "math": "0.0.3"
-  }
+  "dependencies": {}
 }

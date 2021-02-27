@@ -182,12 +182,14 @@ vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n))
 void init_intersection( out Intersection intersection ) { intersection.i = 0; intersection.t = limit_inf; }
 void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {intersections[i].i = 0; intersections[i].t = limit_inf;}}
 // Sort array of intersections by t, ascending
+// TODO: This is broken
+/*
 Intersection[limit_in_per_ray_max] sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
   // A simple insertion sort, nothing fancy
   Intersection result[limit_in_per_ray_max];
   for( int out_i = limit_in_per_ray_max - 1; out_i >= 0; out_i-- ) {
     Intersection largest;
-    largest.t = - limit_float_max;
+    init_intersection(largest);
     for( int in_i = limit_in_per_ray_max - 1; in_i >= 0; in_i-- ) {
       Intersection current = intersections[in_i];
       if( current.t == limit_inf ) {
@@ -202,9 +204,10 @@ Intersection[limit_in_per_ray_max] sort_intersections( Intersection[limit_in_per
   }
   return result;
 }
-// Pre-compute common vectors used during shading
+*/
+// Pre-compute common vectors used during shading, fill in gaps in existing hit
 // Unless this has been called an intersection's data for these will be undefined
-void compute_intersection_data( Ray r, out Intersection i ) {
+void compute_intersection_data( Ray r, inout Intersection i ) {
   i.pos = ray_to_position(r, i.t);
   i.eye = vector_eye(i.pos, r.origin);
 
@@ -225,8 +228,8 @@ void compute_intersection_data( Ray r, out Intersection i ) {
   }
 }
 
-void compute_intersection_data_first( Ray r, out Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
-void compute_intersection_data_all( Ray r, out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
+void compute_intersection_data_first( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
+void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Shading functions
@@ -308,7 +311,7 @@ void main() {
     }
   }
 
-  sort_intersections( intersections );
+//  intersections = sort_intersections( intersections );
 
   // Work out the hit
   Intersection hit;

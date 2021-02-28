@@ -4,7 +4,7 @@ precision highp float;
 
 // Enable error indicators
 // - Diagonal red stripes: Intersections aren't sorted / depth ordering problem
-#define DEBUG
+// #define DEBUG
 
 in vec3 fragPos;
 in vec2 vUV;
@@ -28,6 +28,7 @@ uniform mat4 viewProjectionMatrix;
 // - modelMatrix
 // - meta.x - The type
 //   - 1 - Sphere, at 0,0,0, radius = 1
+//   - 2 - The XZ Plane
 //   - If more types added update compute_intersection_data, mainImage, and any other places is_sphere is called
 // - meta.y - Material index from ubo_0.materials
 // 
@@ -125,7 +126,7 @@ bool is_sphere(int i) { return primitives[i].meta.x == 1.0; }
 // - intersections array will be populated with t
 // - Will return the number of intersections
 // wiki/Line-sphere_intersection
-int sphere_ray_intersect(int i, Ray ray, out Intersection[2] intersections) {
+int sphere_intersect(int i, Ray ray, out Intersection[2] intersections) {
   // pull ray into model space, rest of calculation is for sphere(o=0,0,0 r=1)
   Ray r = ray_tf_world_to_model(ray, primitives[i].modelMatrix);
 
@@ -160,6 +161,34 @@ vec4 sphere_normal(int i, vec4 p) {
   n.w = 0.0;
   return normalize(n);
 }
+
+// Plane functions
+bool is_plane_xz(int i) { return primitives[i].meta.x == 2.0; }
+
+// Intersection of ray with the xz plane
+// - ray: A ray in world space
+bool plane_xz_intersect(int i, Ray ray, out Intersection intersection) {
+  Ray r = ray_tf_world_to_model(ray, primitives[i].modelMatrix);
+
+  // Rays parallel to the surface can't intersect
+  if( abs(r.direction.y) < limit_epsilon ) {
+    return false;
+  }
+  float t = - r.origin.y / r.direction.y;
+  intersection.i = i;
+  intersection.t = t;
+  return true;
+}
+
+vec4 plane_xz_normal(int i) {
+  mat4 m = primitives[i].modelMatrix;
+  vec4 n = vec4(0.0, 1.0, 0.0, 0.0);
+  // Technically should use sub(m,3,3), but zeroing w afterwards is easier
+  n = transpose(inverse(m)) * n; 
+  n.w = 0.0;
+  return normalize(n);
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //// Utility functions
 // Common vector calculations
@@ -217,10 +246,17 @@ void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersec
   for( int i = 0; i < iNumPrimitives; i++ ) {
     if( is_sphere(i) ) {
       Intersection sphere_intersections[2];
-      int ints = sphere_ray_intersect(i, r, sphere_intersections);
+      int ints = sphere_intersect(i, r, sphere_intersections);
 
       for( int j = 0; j < ints; j++ ) {
         intersections[intersections_insert] = sphere_intersections[j];
+        intersections_insert++;
+      }
+    }
+    else if( is_plane_xz(i) ) {
+      Intersection plane_intersection;
+      if( plane_xz_intersect(i, r, plane_intersection) ) {
+        intersections[intersections_insert] = plane_intersection;
         intersections_insert++;
       }
     }
@@ -260,6 +296,9 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
   if( is_sphere(i.i) ) {
     i.normal = sphere_normal(i.i, i.pos);
   }
+  else if( is_plane_xz(i.i) ) {
+    i.normal = plane_xz_normal(i.i);
+  }
   else {
     // An error. Hopefully this looks strange enough to trigger investigation :)
     i.normal = vec4(1.0, 0.0, 0.0, 0.0);
@@ -286,7 +325,7 @@ void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_m
 // but required assignment to element in array (intersection.shadow_casters[i])
 // Turns out that's a problem causes https://stackoverflow.com/questions/60984733/warning-x3550-array-reference-cannot-be-used-as-an-l-value
 //
-// PERF: Shadows will be expensive
+// PERF: Shadows are expensive
 bool compute_shadow_cast( Intersection intersection, Light l ) {
   if( l.shadow.x == 0.0 ) {
     // This light doesn't cast shadows, skip
@@ -365,7 +404,6 @@ vec4 shade_phong( Intersection hit ) {
     // Ambient component
     shade += (m.ambient * light.intensity);
 
-
     // Angle between light and surface normal
     float i_n = dot(i, hit.normal);
     if( i_n < 0.0 ) {
@@ -401,10 +439,6 @@ vec4 shade_phong( Intersection hit ) {
   return shade;
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////
-
-vec4 background_color() {
-  return vec4(0.8, 0.8, 0.8, 1.0);
-}
 
 void main() {
   // fragPos -1.0 -> 1.0, clip space
@@ -448,11 +482,16 @@ void main() {
   Intersection hit;
   init_intersection(hit);
   if( !get_hit_sorted(intersections, hit, false) ) {
-    fragColor = background_color();
     return;
   }
 
   compute_intersection_data(r, hit);
+
+
+  // if( is_plane_xz(hit.i) ) {
+  //   fragColor = vec4(hit.t / 100.0, 0.0, 0.0, 1.0);
+  //   return;
+  // }
 
   // And render
   fragColor = shade_phong( hit );

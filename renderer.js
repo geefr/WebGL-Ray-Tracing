@@ -1,8 +1,10 @@
 import Primitive from './primitives/primitive.js'
 import Sphere from './primitives/sphere.js'
+import PlaneXZ from './primitives/plane.js'
 import PointLight from './primitives/pointlight.js'
 import Material from './primitives/material.js'
 import * as glMatrix from './modules/gl-matrix-2.8.1/lib/gl-matrix.js'
+import Plane from './primitives/plane.js'
 
 class Renderer {
   constructor(canvas) {
@@ -110,7 +112,7 @@ class Renderer {
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
 
-    this.eyePos = [0.0, 10.0, -25.0, 1.0];
+    this.eyePos = [0.0, 10.0, -50.0, 1.0];
 
     this.initialised = true;
   }
@@ -135,6 +137,12 @@ class Renderer {
     glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
     this.materials.push(m);
 
+    m = new Material();
+    baseColour = [0.8, 0.8, 0.4, 1.0];
+    glMatrix.vec4.multiply(m.ambient, m.ambient, baseColour);
+    glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
+    this.materials.push(m);
+
     this.lights = [];
     let l = new PointLight();
     l.position = [0.0, 100.0, 0.0, 1.0];
@@ -143,7 +151,7 @@ class Renderer {
     this.lights.push(l);
 
     l = new PointLight();
-    l.position = [-50.0, 0.0, 0.0, 1.0];
+    l.position = [-10.0, -10.0, 1.0, 1.0];
     // l.intensity = [0.5, 1.0, 0.5, 1.0];
     l.cast_shadows = true;
     this.lights.push(l);
@@ -159,11 +167,11 @@ class Renderer {
 
     // bigboi
     p.set_material(2);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-5.0, 0.0, 0.0]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-5.0, 1.0, 0.0]);
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
     this.primitives.push(p);
 
-    // groundboi
+    // hugeboi
     p = new Sphere();
     p.set_material(1);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -10.0, 0.0]);
@@ -177,6 +185,12 @@ class Renderer {
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.25, 0.25 , 0.25]);
     this.primitives.push(p);
 
+    // The floor
+    p = new PlaneXZ();
+    p.set_material(3);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -10.0, 0.0]);
+    // glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, 15.0 * (Math.PI / 180.0));
+    this.primitives.push(p);
   }
 
   upload_ubo_0 = (blockIndex) => {
@@ -344,7 +358,7 @@ class Renderer {
     glMatrix.mat4.rotateY(rotMat, rotMat, eyeRot);
     glMatrix.vec4.transformMat4(this.eyePos, this.eyePos, rotMat);
 
-    glMatrix.mat4.lookAt(this.viewMatrix, this.eyePos, [0.0, -5.0, 0.0], [0.0, 1.0, 0.0]);
+    glMatrix.mat4.lookAt(this.viewMatrix, this.eyePos, [0.0, -0.0, 0.0], [0.0, 1.0, 0.0]);
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     // Set clear color to black, fully opaque

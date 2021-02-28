@@ -284,11 +284,6 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
     return false;
   }
 
-  // TODO: Thought this was the cause of shadows on object rears but it's not
-  // Any surface with a normal pointing away from the light
-  // cannot have shadows cast upon it by the light
-  vec4 l_v = vector_light(intersection.pos, l);
-
   // Okay, need to check for shadow, down the performance hole we go!
   // Distance from intersection to light - If a hit is closer than this along
   // our ray then an object is causing a shadow.
@@ -297,7 +292,7 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
   float acne_factor = limit_epsilon * 2.0;
   Ray shadow_ray;
   shadow_ray.origin = intersection.pos + (acne_factor * intersection.normal);
-  shadow_ray.direction = l_v;
+  shadow_ray.direction = vector_light(intersection.pos, l);
 
   Intersection shadow_intersections[limit_in_per_ray_max];
   init_intersections(shadow_intersections);

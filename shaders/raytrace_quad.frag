@@ -119,8 +119,6 @@ Material primitive_material(int i) { return materials[int(primitives[i].meta.y)]
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Sphere functions
 bool is_sphere(int i) { return primitives[i].meta.x == 1.0; }
-vec3 sphere_origin(int i) { return (primitives[i].modelMatrix * vec4(vec3(0.0),1.0)).xyz; }
-float sphere_radius(int i) { return (primitives[i].modelMatrix * vec4(1.0, 0.0, 0.0, 0.0)).x; }
 
 // Intersection of ray with the sphere at primitives[i]
 // - ray: A ray in world space (oh rayray, mommy misses you D:)
@@ -189,14 +187,25 @@ int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections
 }
 
 // A simple sort, nothing fancy, probably not fast
+// PERF: This is around 50% cost of trace + shadows + phong. Needs addressing
 void sort_intersections( inout Intersection[limit_in_per_ray_max] intersections ) {
   Intersection result[limit_in_per_ray_max];
   for( int out_i = 0; out_i < limit_in_per_ray_max - 1; out_i++ ) {
-    int smallest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
+    int closest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
+
+    // If the closest intersection is at infinity then there's no point continuing
+    // everything remaining in the array is useless
+    if( intersections[closest_i].t == limit_inf ) {
+      for( ; out_i < limit_in_per_ray_max; out_i++ ) {
+        init_intersection(intersections[out_i]);
+      }
+      return;
+    }
+
     // Swap smallest with current element
     Intersection tmp = intersections[out_i];
-    intersections[out_i] = intersections[smallest_i];
-    intersections[smallest_i] = tmp;
+    intersections[out_i] = intersections[closest_i];
+    intersections[closest_i] = tmp;
   }
 }
 

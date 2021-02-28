@@ -288,18 +288,15 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
   // Any surface with a normal pointing away from the light
   // cannot have shadows cast upon it by the light
   vec4 l_v = vector_light(intersection.pos, l);
-  // float l_n = dot(l_v, intersection.normal);
-  // if( l_n < 0.0 ) {
-  //   return false;
-  // }
 
   // Okay, need to check for shadow, down the performance hole we go!
   // Distance from intersection to light - If a hit is closer than this along
   // our ray then an object is causing a shadow.
   float l_distance = distance(intersection.pos, l.position);
 
+  float acne_factor = limit_epsilon * 2.0;
   Ray shadow_ray;
-  shadow_ray.origin = intersection.pos;
+  shadow_ray.origin = intersection.pos + (acne_factor * intersection.normal);
   shadow_ray.direction = l_v;
 
   Intersection shadow_intersections[limit_in_per_ray_max];
@@ -314,24 +311,33 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
     // could save a few cycles
     compute_intersection_data(shadow_ray, shadow_intersect);
 
-    // No object may cast a shadow on itself
+    // Objects behind the surface cannot cast a shadow on the surface
+    if( shadow_intersect.t < 0.0 ) {
+      continue;
+    }
+
+    // An object cannot cast shadows on itself
+    // (Logically it can, but that's handled by the lighting
+    // calculations, prior to this point)
     if( shadow_intersect.i == intersection.i ) {
       continue;
     }
 
-    // Inner surfaces may not cast shadows (But may have shadows cast upon them)
-    if( shadow_intersect.inside == false ) {
-      continue;
+    // The most definite shadow we can have - The outside
+    // of an object (not self) is blocking the ray
+    // As the ray is surface -> light here we need to check
+    // on inside == true
+    // Check on distance is to ensure object is between
+    // the surface and the light
+    if( shadow_intersect.inside == true &&
+        shadow_intersect.t < l_distance ) {
+          return true;
     }
 
-    // vec4 p = ray_to_position( shadow_ray, shadow_intersect.t );
-    // if( distance(intersection.pos, p) < l_distance) {
-    //   return true;
-    // }
-
-    if( shadow_intersect.t < l_distance ) {
-      return true;
-    }
+    // If not there's 2 approaches here:
+    // 1: Try to apply extra logic to work out if it's a shadow (tricky)
+    // 2: Ensure rays start outside primitives to avoid acne (easy, reduces logic to the one case above)
+    // TODO: Picked 2 in this case. Not perfect but easy and fast.
   }
   return false;
 }
@@ -355,17 +361,24 @@ vec4 shade_phong( Intersection hit ) {
     // Ambient component
     shade += (m.ambient * light.intensity);
 
-    // Check if the light is blocked (in shadow)
-    // If so only the ambient component is used
-    if( compute_shadow_cast( hit, light ) ) {
-      continue;
-    }
 
     // Angle between light and surface normal
     float i_n = dot(i, hit.normal);
     if( i_n < 0.0 ) {
-      // Light is behind the surface, diffuse & specular == 0
+      // Light is behind the surface
+      // diffuse & specular == 0
+      // Shadow calculation disabled
     } else {
+      // Light is somewhere in front of the surface
+      // diffuse and specular based on light angle to surface
+      // shadows may be casted by objects between surface and light
+      //
+      // Check if the light is blocked (in shadow)
+      // If so diffuse and specular are zero
+      if( compute_shadow_cast( hit, light ) ) {
+        continue;
+      }
+      
       // Diffuse component
       shade += (m.diffuse * light.intensity * i_n);
 

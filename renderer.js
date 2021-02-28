@@ -20,7 +20,9 @@ class Renderer {
     // Initialize the GL context
     const gl = this.canvas.getContext("webgl2", {
       antialias: true, // This may be a dumb idea for ray tracing :)
-      powerPreference: "high-performance"
+      powerPreference: "high-performance",
+      failIfMajorPerformanceCaveat: true,
+      desynchronized: true
     });
     this.gl = gl;
     // Only continue if WebGL is available and working

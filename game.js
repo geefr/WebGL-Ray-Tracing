@@ -15,7 +15,7 @@ class Game {
     // TODO: Frame delay currently ignored
     // this.frame_delay_s = 1.0 / 30.0;
 
-    this.resolution_factor = 4;
+    this.resolution_factor = 3;
 
     requestAnimationFrame(this.frame);
   }

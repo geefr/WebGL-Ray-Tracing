@@ -9,7 +9,7 @@ precision highp float;
 // Enable features
 #define ENABLE_SHADOWS
 #define ENABLE_REFLECTIONS
-// TODO: This really requires uv calculations for each primitive, and those aren't implemented yet
+// TODO: Patterns need some work - Would be extended to texture support or similar
 #define ENABLE_PATTERNS
 
 #define PI 3.1415926538
@@ -80,7 +80,7 @@ out vec4 fragColor;
 //// Limits and constants
 // The maximum number of intersections for a single ray (Because glsl can't have dynamic arrays)
 const int limit_in_per_ray_max = 10;
-const int limit_reflection_depth = 5;
+const int limit_reflection_depth = 4;
 const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
 const float limit_float_max = 1e19;
 const float limit_epsilon = 1e-12;
@@ -326,11 +326,17 @@ void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersec
 // Determine which intersection is the 'hit' - Smallest non-negative t
 // Requires that intersections be sorted before calling
 // if allow_inside == true both inner and outer surfaces will be returned
-bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit, bool allow_inside ) {
+bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit, bool allow_inside, bool allow_self, int self_i ) {
   bool result = false;
 
   for( int i = 0; i < limit_in_per_ray_max; i++ ) {
     hit = intersections[i];
+
+    if( allow_self == false &&
+        hit.i == self_i ) {
+          continue;
+    }
+
     if( hit.t == limit_inf ||
         hit.t < 0.0 ) {
           // Invalid, or behind the ray's origin
@@ -462,7 +468,7 @@ bool compute_reflection(Intersection hit, out Intersection reflected_hit) {
   sort_intersections(reflect_intersections);
   compute_intersection_data_all(r, reflect_intersections );
 
-  return get_hit_sorted(reflect_intersections, reflected_hit, false);
+  return get_hit_sorted(reflect_intersections, reflected_hit, false, false, hit.i);
 #endif
   return false;
 }
@@ -594,7 +600,8 @@ void main() {
   // This solves some render noise in tangent cases.
   Intersection hit;
   init_intersection(hit);
-  if( !get_hit_sorted(intersections, hit, false) ) {
+  // allow_self true as we don't have a 'self' yet (It's a hack, avoid the check in get_hit)
+  if( !get_hit_sorted(intersections, hit, false, true, 0) ) {
     fragColor = vec4(1.0, 0.0, 1.0, 1.0);
     return;
   }
@@ -604,12 +611,12 @@ void main() {
 
 #ifdef ENABLE_REFLECTIONS
   // Reflect until we hit a non-reflective surface, or hit the reflection limit
-  Material m = primitive_material(hit.i);
-  Material reflected_m = primitive_material(hit.i);
+ 
+  Material current_m = primitive_material(hit.i);
   Intersection current_hit = hit;
   Intersection reflected_hit = hit;
   int reflection_depth = 0;
-  while(reflected_m.phys.x != 0.0 && reflection_depth < limit_reflection_depth) {
+  while(current_m.phys.x != 0.0) {
     if( !compute_reflection(current_hit, reflected_hit) ) {
       // We failed to hit anything
       // - Ray heads off into the ether
@@ -617,17 +624,23 @@ void main() {
       break;
     }
 
+    // Shade the reflection - But with shadows disabled, this is slow enough already
+    // Mix based on the reflectivity of the current surface
+    vec4 reflected_shade = shade_phong( reflected_hit, false );
+    shade = mix(shade, reflected_shade, current_m.phys.x);
+
     current_hit = reflected_hit;
-    reflected_m = primitive_material(reflected_hit.i);
+    current_m = primitive_material(current_hit.i);
 
     reflection_depth++;
-  }
 
-  // Shade the reflection - But with shadows disabled, this is slow enough already
-  // Mix based on the reflectivity of the main surface
-  if( reflection_depth > 0 ) {
-    vec4 reflected_shade = shade_phong( current_hit, false );
-    shade = mix(shade, reflected_shade, m.phys.x);
+    if( reflection_depth == limit_reflection_depth ) {
+      // We can't go any further. If the current surface is still reflective
+      // we don't have much of a choice here - Apply some fudge factor to the final shading
+      // TODO: Fog would be a nice way to hide this. Maybe fog over the summed ray distance?
+      // Either way we're done processing.
+      break;
+    }
   }
 #endif
 

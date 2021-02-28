@@ -12,7 +12,10 @@ class Game {
 
     this.last_frame = Date.now();
     this.current_frame = this.last_frame;
-    this.frame_delay_s = 1.0 / 30.0;
+    // TODO: Frame delay currently ignored
+    // this.frame_delay_s = 1.0 / 30.0;
+
+    this.resolution_factor = 4;
 
     requestAnimationFrame(this.frame);
   }
@@ -51,10 +54,13 @@ class Game {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
+    // TODO: For now I've hacked in a resolution reduction here,
+    // most development is being done on an intel gpu :/
+
     this.canvas.style.width = w;
     this.canvas.style.height = h;
-    this.canvas.width = w;
-    this.canvas.height = h;
+    this.canvas.width = w / this.resolution_factor;
+    this.canvas.height = h / this.resolution_factor;
   }
 }
 

@@ -2,6 +2,10 @@
 
 precision highp float;
 
+// Enable error indicators
+// - Diagonal red stripes: Intersections aren't sorted / depth ordering problem
+#define DEBUG
+
 in vec3 fragPos;
 in vec2 vUV;
 
@@ -41,16 +45,22 @@ struct Primitive {
 struct Light {
   vec4 intensity;  // rgb_
   vec4 position;   // xyz1 (TODO: Support for directional lights)
-  vec4 pad1;
-  vec4 pad2;
+  vec4 shadow;     // Cast shadows if x != 0.0, yzw unused
+  vec4 pad;
 };
 
 struct Material {
   vec4 ambient;    // rgb_
   vec4 diffuse;    // rgb_
   vec4 specular;   // rgbs, s=shininess
-  vec4 pad1;
+  vec4 pad;
 };
+
+// Upper limits for scene objects
+const int max_iNumPrimitives = 20;
+const int max_iNumMaterials = 8;
+// THERE ARE FOUR LIGHTS!
+const int max_iNumLights = 4;
 
 uniform int iNumPrimitives;
 uniform int iNumMaterials;
@@ -58,9 +68,9 @@ uniform int iNumLights;
 // This block only contains the primitives, to simplify the buffer upload in js
 layout (std140) uniform ubo_0
 {
-  Light lights[10];
-  Material materials[10];
-  Primitive primitives[40];
+  Light lights[max_iNumLights];
+  Material materials[max_iNumMaterials];
+  Primitive primitives[max_iNumPrimitives];
 } ;
 
 out vec4 fragColor;
@@ -71,7 +81,7 @@ out vec4 fragColor;
 const int limit_in_per_ray_max = 10;
 const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
 const float limit_float_max = 1e19;
-const float limit_epsilon = 1e-6;
+const float limit_epsilon = 1e-12;
 
 //// Data Types (That aren't uniforms)
 // A ray, starting at origin, travelling along direction
@@ -160,8 +170,11 @@ vec4 vector_light( vec4 p, Light l ) { return normalize(l.position - p); }
 vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n)); }
 
 // Initialise intersections to insane values (t=inf)
-void init_intersection( out Intersection intersection ) { intersection.i = 0; intersection.t = limit_inf; }
-void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {intersections[i].i = 0; intersections[i].t = limit_inf;}}
+void init_intersection( out Intersection intersection ) { 
+  intersection.i = 0;
+  intersection.t = limit_inf;
+}
+void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {init_intersection(intersections[i]);}}
 
 int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections, int min_i, int max_i ) {
   int smallest_i = max_i + 1;
@@ -176,7 +189,7 @@ int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections
 }
 
 // A simple sort, nothing fancy, probably not fast
-void sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
+void sort_intersections( inout Intersection[limit_in_per_ray_max] intersections ) {
   Intersection result[limit_in_per_ray_max];
   for( int out_i = 0; out_i < limit_in_per_ray_max - 1; out_i++ ) {
     int smallest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
@@ -187,15 +200,44 @@ void sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
   }
 }
 
+// Perform ray intersection with every primitive
+void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) {
+  int intersections_insert = 0;
+  
+  // Intersect with each primitive
+  for( int i = 0; i < iNumPrimitives; i++ ) {
+    if( is_sphere(i) ) {
+      Intersection sphere_intersections[2];
+      int ints = sphere_ray_intersect(i, r, sphere_intersections);
+
+      for( int j = 0; j < ints; j++ ) {
+        intersections[intersections_insert] = sphere_intersections[j];
+        intersections_insert++;
+      }
+    }
+  }
+}
+
 // Determine which intersection is the 'hit' - Smallest non-negative t
 // Requires that intersections be sorted before calling
-bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit ) {
+// if allow_inside == true both inner and outer surfaces will be returned
+bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit, bool allow_inside ) {
   bool result = false;
-  hit = intersections[0];
-  if( hit.t == limit_inf ||
-      hit.t <  0.0 ) {
-        return false;
-  } else {
+
+  for( int i = 0; i < limit_in_per_ray_max; i++ ) {
+    hit = intersections[i];
+    if( hit.t == limit_inf ||
+        hit.t < 0.0 ) {
+          // Invalid, or behind the ray's origin
+          continue;
+    }
+
+    if( allow_inside == false &&
+        hit.inside   == true ) {
+          continue;
+    }
+
+    // This is the first valid intersection on the ray
     return true;
   }
 }
@@ -221,10 +263,80 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
   } else {
     i.inside = false;
   }
+
+  // Note: DO NOT compute shadows in here unless you want infinite recursion in your shader ;)
 }
 
+/*
 void compute_intersection_data_first( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
 void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
+*/
+
+// Compute whether a shadow is cast for a given intersection & light
+// Note: previous attempt pre-calculated this for the intersection,
+// but required assignment to element in array (intersection.shadow_casters[i])
+// Turns out that's a problem causes https://stackoverflow.com/questions/60984733/warning-x3550-array-reference-cannot-be-used-as-an-l-value
+//
+// PERF: Shadows will be expensive
+bool compute_shadow_cast( Intersection intersection, Light l ) {
+  if( l.shadow.x == 0.0 ) {
+    // This light doesn't cast shadows, skip
+    return false;
+  }
+
+  // Okay, need to check for shadow, down the performance hole we go!
+  // Distance from intersection to light - If a hit is closer than this along
+  // our ray then an object is causing a shadow.
+  float l_distance = distance(intersection.pos, l.position);
+
+  float acne_factor = limit_epsilon * 2.0;
+  Ray shadow_ray;
+  shadow_ray.origin = intersection.pos + (acne_factor * intersection.normal);
+  shadow_ray.direction = vector_light(intersection.pos, l);
+
+  Intersection shadow_intersections[limit_in_per_ray_max];
+  init_intersections(shadow_intersections);
+  ray_intersect_all(shadow_ray, shadow_intersections);
+
+  for( int i = 0; i < limit_in_per_ray_max; i++ ) {
+    Intersection shadow_intersect = shadow_intersections[i];
+    // intersection needs to be populated to determing if it should
+    // cast shadows.
+    // TODO: PERF: Think we just need a subset of this here, so
+    // could save a few cycles
+    compute_intersection_data(shadow_ray, shadow_intersect);
+
+    // Objects behind the surface cannot cast a shadow on the surface
+    if( shadow_intersect.t < 0.0 ) {
+      continue;
+    }
+
+    // An object cannot cast shadows on itself
+    // (Logically it can, but that's handled by the lighting
+    // calculations, prior to this point)
+    if( shadow_intersect.i == intersection.i ) {
+      continue;
+    }
+
+    // The most definite shadow we can have - The outside
+    // of an object (not self) is blocking the ray
+    // As the ray is surface -> light here we need to check
+    // on inside == true
+    // Check on distance is to ensure object is between
+    // the surface and the light
+    if( shadow_intersect.inside == true &&
+        shadow_intersect.t < l_distance ) {
+          return true;
+    }
+
+    // If not there's 2 approaches here:
+    // 1: Try to apply extra logic to work out if it's a shadow (tricky)
+    // 2: Ensure rays start outside primitives to avoid acne (easy, reduces logic to the one case above)
+    // TODO: Picked 2 in this case. Not perfect but easy and fast.
+  }
+  return false;
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Shading functions
@@ -244,11 +356,24 @@ vec4 shade_phong( Intersection hit ) {
     // Ambient component
     shade += (m.ambient * light.intensity);
 
+
     // Angle between light and surface normal
     float i_n = dot(i, hit.normal);
     if( i_n < 0.0 ) {
-      // Light is behind the surface, diffuse & specular == 0
+      // Light is behind the surface
+      // diffuse & specular == 0
+      // Shadow calculation disabled
     } else {
+      // Light is somewhere in front of the surface
+      // diffuse and specular based on light angle to surface
+      // shadows may be casted by objects between surface and light
+      //
+      // Check if the light is blocked (in shadow)
+      // If so diffuse and specular are zero
+      if( compute_shadow_cast( hit, light ) ) {
+        continue;
+      }
+      
       // Diffuse component
       shade += (m.diffuse * light.intensity * i_n);
 
@@ -291,27 +416,29 @@ void main() {
   // All of the intersections on this ray
   Intersection intersections[limit_in_per_ray_max];
   init_intersections( intersections );
-  int intersections_insert = 0;
-  
-  // Intersect with each primitive
-  for( int i = 0; i < iNumPrimitives; i++ ) {
-    if( is_sphere(i) ) {
-      Intersection sphere_intersections[2];
-      int ints = sphere_ray_intersect(i, r, sphere_intersections);
 
-      for( int j = 0; j < ints; j++ ) {
-        intersections[intersections_insert] = sphere_intersections[j];
-        intersections_insert++;
-      }
-    }
-  }
+  ray_intersect_all( r, intersections );
 
   sort_intersections( intersections );
 
+#ifdef DEBUG
+  float t = - limit_float_max;
+  for( int i = 0; i < limit_in_per_ray_max - 1; i++ ) {
+    Intersection current = intersections[i];
+    Intersection next = intersections[i + 1];
+    if( next.t < current.t ) {
+      fragColor = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), sin(400.0 * distance(vUV, vec2(0.0, 0.0))));
+      return;
+    }
+  }
+#endif
+
   // Work out the hit
+  // Choosing not to render inner surfaces here
+  // This solves some render noise in tangent cases.
   Intersection hit;
   init_intersection(hit);
-  if( !get_hit_sorted(intersections, hit) ) {
+  if( !get_hit_sorted(intersections, hit, false) ) {
     fragColor = background_color();
     return;
   }
@@ -320,5 +447,4 @@ void main() {
 
   // And render
   fragColor = shade_phong( hit );
-
 }

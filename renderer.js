@@ -108,7 +108,7 @@ class Renderer {
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
 
-    this.eyePos = [0.0, 10.0, -10.0, 1.0];
+    this.eyePos = [0.0, 10.0, -25.0, 1.0];
 
     this.initialised = true;
   }
@@ -127,34 +127,54 @@ class Renderer {
     glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
     this.materials.push(m);
 
+    m = new Material();
+    baseColour = [1.0, 1.0, 1.0, 1.0];
+    glMatrix.vec4.multiply(m.ambient, m.ambient, baseColour);
+    glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
+    this.materials.push(m);
+
     this.lights = [];
     let l = new PointLight();
-    l.position = [0.0, 10.0, 0.0, 1.0];
-    l.intensity = [1.0, 0.5, 0.5, 1.0];
+    l.position = [0.0, 100.0, 0.0, 1.0];
+    // l.intensity = [0.3, 0.3, 0.3, 1.0];
+    l.cast_shadows = true;
     this.lights.push(l);
 
     l = new PointLight();
-    l.position = [-10.0, 5.0, 0.0, 1.0];
-    l.intensity = [0.5, 1.0, 0.5, 1.0];
+    l.position = [-50.0, 0.0, 0.0, 1.0];
+    // l.intensity = [0.5, 1.0, 0.5, 1.0];
+    l.cast_shadows = true;
     this.lights.push(l);
 
     l = new PointLight();
-    l.position = [10.0, -5.0, 0.0, 1.0];
-    l.intensity = [0.5, 0.5, 1.0, 1.0];
+    l.position = [50.0, 0.0, 0.0, 1.0];
+    // l.intensity = [1.0, 1.0, 1.0, 1.0];
+    l.cast_shadows = true;
     this.lights.push(l);
 
     this.primitives = [];
     let p = new Sphere();
-    p.set_material(0);
+
+    // bigboi
+    p.set_material(2);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-5.0, 0.0, 0.0]);
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
     this.primitives.push(p);
 
+    // groundboi
     p = new Sphere();
     p.set_material(1);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [5.0, 0.0, 0.0]);
-    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -10.0, 0.0]);
+    // glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [10.0, 10.0, 10.0]);
     this.primitives.push(p);
+
+    // smolboi
+    p = new Sphere();
+    p.set_material(0);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [5.0, 0.0, 0.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.25, 0.25 , 0.25]);
+    this.primitives.push(p);
+
   }
 
   upload_ubo_0 = (blockIndex) => {
@@ -163,7 +183,7 @@ class Renderer {
     // to UNIFORM_BUFFER, and shader program bound.
     // TODO: This is ugly as all heck
     //
-    // struct Primitive {
+    // struct Primitive { align 16 float (32, if meta is present)
     //   mat4 modelMatrix;
     //   vec4 meta;
     //   vec4 pad1;
@@ -174,15 +194,15 @@ class Renderer {
     // struct Light {
     //   vec4 intensity;  // rgb_
     //   vec4 position;   // xyz1 (TODO: Support for directional lights)
-    //   vec4 pad1;
-    //   vec4 pad2;
+    //   vec4 shadow;     // Cast shadows if x != 0.0, yzw unused
+    //   vec4 pad;
     // };
     
     // struct Material {
     //   vec4 ambient;    // rgb_
     //   vec4 diffuse;    // rgb_
     //   vec4 specular;   // rgbs, s=shininess
-    //   vec4 pad1;
+    //   vec4 pad;
     // };
     //
     // layout (std140) uniform ubo_0
@@ -203,11 +223,32 @@ class Renderer {
     const material_size = 16;
     const primitive_size = 32;
 
-    const lights_offset = 0;
-    const materials_offset = 10 * light_size;
-    const primitives_offset = materials_offset + (10 * material_size);
+    // MAKE SURE THESE MATCH THE SHADER!
+    const max_lights = 4;
+    const max_materials = 8;
+    const max_primitives = 20;
 
-    for(let i = 0; i < this.lights.length; i++) {
+    const lights_offset = 0;
+    const materials_offset = max_lights * light_size;
+    const primitives_offset = materials_offset + (max_materials * material_size);
+
+    const num_lights = this.lights.length;
+    if( num_lights > max_lights ) {
+      console.error(`Too many lights(${num_lights}) in scene, there can only be ${max_lights} lights`);
+      num_lights = max_lights;
+    }
+    const num_materials = this.materials.length;
+    if( num_lights > max_lights ) {
+      console.error(`Too many materials(${num_materials}) in scene, there can only be ${max_materials} materials`);
+      num_lights = max_lights;
+    }
+    const num_primitives = this.primitives.length;
+    if( num_lights > max_lights ) {
+      console.error(`Too many primitives(${num_primitives}) in scene, there can only be ${max_primitives} primitives`);
+      num_lights = max_lights;
+    }
+
+    for(let i = 0; i < num_lights; i++) {
       let offset = lights_offset + (i * light_size);
       let l = this.lights[i];
       data[offset++] = l.intensity[0];
@@ -219,9 +260,15 @@ class Renderer {
       data[offset++] = l.position[1];
       data[offset++] = l.position[2];
       data[offset++] = l.position[3];
+
+      if( l.cast_shadows ) {
+        data[offset++] = 1.0;
+      } else {
+        data[offset++] = 0.0;
+      }
     }
 
-    for(let i = 0; i < this.materials.length; i++) {
+    for(let i = 0; i < num_materials; i++) {
       let offset = materials_offset + (i * material_size);
       let m = this.materials[i];
 
@@ -241,8 +288,7 @@ class Renderer {
       data[offset++] = m.specular[3];
     }
 
-    const num_prims = this.primitives.length;
-    for(let i = 0; i < num_prims; i++) {
+    for(let i = 0; i < num_primitives; i++) {
       let offset = primitives_offset + (i * primitive_size);
       let p = this.primitives[i];
       
@@ -296,7 +342,7 @@ class Renderer {
     glMatrix.mat4.rotateY(rotMat, rotMat, eyeRot);
     glMatrix.vec4.transformMat4(this.eyePos, this.eyePos, rotMat);
 
-    glMatrix.mat4.lookAt(this.viewMatrix, this.eyePos, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    glMatrix.mat4.lookAt(this.viewMatrix, this.eyePos, [0.0, -5.0, 0.0], [0.0, 1.0, 0.0]);
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     // Set clear color to black, fully opaque

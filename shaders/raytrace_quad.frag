@@ -6,12 +6,20 @@ precision highp float;
 // - Diagonal red stripes: Intersections aren't sorted / depth ordering problem
 // #define DEBUG
 
+// Enable shadows
+#define ENABLE_SHADOWS
+
 in vec3 fragPos;
 in vec2 vUV;
 
+// width pixels, height pixels, fov(rad), nearz
+uniform vec4 viewParams;
+
+uniform mat4 viewMatrix;
+
 // Shadertoy uniforms
 // TODO: Should add most of these in, but do it in a ubo if possible (may be close to the limit on some systems?)
-uniform vec3 iResolution;           // viewport resolution (in pixels)
+// uniform vec3 iResolution;           // viewport resolution (in pixels)
 // uniform float     iTime;                 // shader playback time (in seconds)
 // uniform float     iTimeDelta;            // render time (in seconds)
 // uniform int       iFrame;                // shader playback frame
@@ -22,7 +30,7 @@ uniform vec3 iResolution;           // viewport resolution (in pixels)
 // uniform vec3      iChannelResolution[4]; // Resolution of input channels
 // uniform sampler2D iChannel0;             // Input channels (For audio in this case)
 
-uniform mat4 viewProjectionMatrix;
+
 
 // A primitive / object
 // - modelMatrix
@@ -171,10 +179,12 @@ bool plane_xz_intersect(int i, Ray ray, out Intersection intersection) {
   Ray r = ray_tf_world_to_model(ray, primitives[i].modelMatrix);
 
   // Rays parallel to the surface can't intersect
+  // Coplanar rays intersect an infinite amount
   if( abs(r.direction.y) < limit_epsilon ) {
     return false;
   }
-  float t = - r.origin.y / r.direction.y;
+
+  float t = (- r.origin.y) / r.direction.y;
   intersection.i = i;
   intersection.t = t;
   return true;
@@ -183,7 +193,6 @@ bool plane_xz_intersect(int i, Ray ray, out Intersection intersection) {
 vec4 plane_xz_normal(int i) {
   mat4 m = primitives[i].modelMatrix;
   vec4 n = vec4(0.0, 1.0, 0.0, 0.0);
-  // Technically should use sub(m,3,3), but zeroing w afterwards is easier
   n = transpose(inverse(m)) * n; 
   n.w = 0.0;
   return normalize(n);
@@ -311,14 +320,12 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
   } else {
     i.inside = false;
   }
-
   // Note: DO NOT compute shadows in here unless you want infinite recursion in your shader ;)
 }
 
-/*
 void compute_intersection_data_first( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
 void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
-*/
+
 
 // Compute whether a shadow is cast for a given intersection & light
 // Note: previous attempt pre-calculated this for the intersection,
@@ -327,6 +334,7 @@ void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_m
 //
 // PERF: Shadows are expensive
 bool compute_shadow_cast( Intersection intersection, Light l ) {
+#ifdef ENABLE_SHADOWS
   if( l.shadow.x == 0.0 ) {
     // This light doesn't cast shadows, skip
     return false;
@@ -382,6 +390,7 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
     // 2: Ensure rays start outside primitives to avoid acne (easy, reduces logic to the one case above)
     // TODO: Picked 2 in this case. Not perfect but easy and fast.
   }
+#endif
   return false;
 }
 
@@ -440,21 +449,43 @@ vec4 shade_phong( Intersection hit ) {
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-void main() {
-  // fragPos -1.0 -> 1.0, clip space
-  // vUV.st   0.0 -> 1.0
+Ray ray_for_pixel() {
+  // Camera parameters
+  float half_view_range = tan( viewParams.z / 2.0 );
+  float aspect_ratio = viewParams.x / viewParams.y;
+  
+  float half_width = 0.0;
+  float half_height = 0.0;
+  if( aspect_ratio >= 1.0 ) {
+    half_width = half_view_range;
+    half_height = half_view_range / aspect_ratio;
+  } else {
+    half_width = half_view_range * aspect_ratio;
+    half_height = half_view_range;
+  }
+  float frag_size = (half_width * 2.0) / viewParams.x;
 
-  // Our ray goes from the near plane, to the far plane
-  // fragPos is in clip space, so we can defined it there
-  // and then project back to world space
-  // TODO: This relies heavily on the projection matrix, and can have depth precision
-  // issues if values aren't chosen carefully. Would be better in the long run to replace this.
-  vec4 source = inverse(viewProjectionMatrix) * vec4(- fragPos.x, fragPos.y, -1.0, 1.0);
-  vec4 target = inverse(viewProjectionMatrix) * vec4(- fragPos.x, fragPos.y, 1.0, 1.0);
+  // Center of current pixel, relative to bottom left. 0,0 -> width,height
+  vec2 frag_offset = ((vUV * viewParams.xy) + vec2(0.5)) * frag_size;
 
+  vec4 frag_world = vec4(
+    half_width - frag_offset.x,
+    half_height - frag_offset.y,
+    -1.0,
+    1.0
+  );
+  // TODO: I was tired when I wrote this, based on p104 in The Ray Tracing Challenge
+  frag_world.y *= -1.0;
+
+  // Define the ray in world space
   Ray r;
-  r.origin = source;
-  r.direction = normalize(target - source);
+  r.origin = inverse(viewMatrix) * vec4(0.0, 0.0, 0.0, 1.0);
+  r.direction = normalize((inverse(viewMatrix) * frag_world) - r.origin);
+  return r;
+}
+
+void main() {
+  Ray r = ray_for_pixel();
 
   // All of the intersections on this ray
   Intersection intersections[limit_in_per_ray_max];
@@ -476,22 +507,17 @@ void main() {
   }
 #endif
 
+  compute_intersection_data_all(r, intersections );
+
   // Work out the hit
   // Choosing not to render inner surfaces here
   // This solves some render noise in tangent cases.
   Intersection hit;
   init_intersection(hit);
   if( !get_hit_sorted(intersections, hit, false) ) {
+    fragColor = vec4(1.0, 0.0, 1.0, 1.0);
     return;
   }
-
-  compute_intersection_data(r, hit);
-
-
-  // if( is_plane_xz(hit.i) ) {
-  //   fragColor = vec4(hit.t / 100.0, 0.0, 0.0, 1.0);
-  //   return;
-  // }
 
   // And render
   fragColor = shade_phong( hit );

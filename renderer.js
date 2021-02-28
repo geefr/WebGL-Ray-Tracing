@@ -97,8 +97,8 @@ class Renderer {
 
     // Uniform locations & buffers
     this.quad_program_uni = {
-      iResolution:gl.getUniformLocation(this.quad_program, "iResolution"),
-      viewProjectionMatrix:gl.getUniformLocation(this.quad_program, "viewProjectionMatrix"),
+      viewParams:gl.getUniformLocation(this.quad_program, "viewParams"),
+      viewMatrix:gl.getUniformLocation(this.quad_program, "viewMatrix"),
       iNumPrimitives:gl.getUniformLocation(this.quad_program, "iNumPrimitives"),
       iNumMaterials:gl.getUniformLocation(this.quad_program, "iNumMaterials"),
       iNumLights:gl.getUniformLocation(this.quad_program, "iNumLights"),
@@ -112,7 +112,7 @@ class Renderer {
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
 
-    this.eyePos = [0.0, 10.0, -50.0, 1.0];
+    this.eyePos = [0.0, 15.0, -30.0, 1.0];
 
     this.initialised = true;
   }
@@ -141,23 +141,25 @@ class Renderer {
     baseColour = [0.8, 0.8, 0.4, 1.0];
     glMatrix.vec4.multiply(m.ambient, m.ambient, baseColour);
     glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
+    glMatrix.vec4.multiply(m.specular, m.specular, [0.2, 0.2, 0.2, 1.0]);
+    m.specular[3] = 2.0;
     this.materials.push(m);
 
     this.lights = [];
     let l = new PointLight();
     l.position = [0.0, 100.0, 0.0, 1.0];
-    // l.intensity = [0.3, 0.3, 0.3, 1.0];
+    l.intensity = [0.3, 0.3, 0.3, 1.0];
     l.cast_shadows = true;
     this.lights.push(l);
 
     l = new PointLight();
-    l.position = [-10.0, -10.0, 1.0, 1.0];
+    l.position = [-50.0, 20.0, -50.0, 1.0];
     // l.intensity = [0.5, 1.0, 0.5, 1.0];
     l.cast_shadows = true;
     this.lights.push(l);
 
     l = new PointLight();
-    l.position = [50.0, 0.0, 0.0, 1.0];
+    l.position = [50.0, 20.0, 0.0, 1.0];
     // l.intensity = [1.0, 1.0, 1.0, 1.0];
     l.cast_shadows = true;
     this.lights.push(l);
@@ -167,28 +169,28 @@ class Renderer {
 
     // bigboi
     p.set_material(2);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-5.0, 1.0, 0.0]);
-    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-3.0, 2.0, 0.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [2.0, 2.0 , 2.0]);
     this.primitives.push(p);
 
     // hugeboi
     p = new Sphere();
     p.set_material(1);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -10.0, 0.0]);
-    // glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [10.0, 10.0, 10.0]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -8.0, 0.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [10.0, 10.0, 10.0]);
     this.primitives.push(p);
 
     // smolboi
     p = new Sphere();
     p.set_material(0);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [5.0, 0.0, 0.0]);
-    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.25, 0.25 , 0.25]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [1.0, 2.0, 0.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
     this.primitives.push(p);
 
     // The floor
     p = new PlaneXZ();
     p.set_material(3);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -10.0, 0.0]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 0.0]);
     // glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, 15.0 * (Math.PI / 180.0));
     this.primitives.push(p);
   }
@@ -343,22 +345,22 @@ class Renderer {
       return;
     }
 
-    // TODO: Don't hardcode these
-    this.projectionMatrix = glMatrix.mat4.create();
-    // You may think the near/far plane values here look a little weird, and you would be right.
-    // They have been chosed to avoid precision issues when transforming source/target positions
-    // from clip -> world space in the fragment shader.
-    // Alternate approach would be to not use a projection matrix, and do pixel-based calculations
-    // to work out an eye -> canvas ray (The ray tracing challenge p.102)
-    glMatrix.mat4.perspective(this.projectionMatrix, 45.0, this.canvas.width / this.canvas.height, 1.0, 1.1);
+    // Perspective parameters
+    // TODO: This is calculated within the shader, there is no projection matrix
+    let fov = 60.0;
+    let nearZ = 1.0;
+    let farZ = 100.0;
     this.viewMatrix = glMatrix.mat4.create();
+    this.viewParams = [this.canvas.width, this.canvas.height, fov * (Math.PI / 180.0), nearZ];
 
-    const eyeRot = 0.02;
+    const eyeRot = 0.01;
     let rotMat = glMatrix.mat4.create();
     glMatrix.mat4.rotateY(rotMat, rotMat, eyeRot);
+    // glMatrix.mat4.rotateX(rotMat, rotMat, eyeRot);
+    // glMatrix.mat4.rotateZ(rotMat, rotMat, eyeRot);
     glMatrix.vec4.transformMat4(this.eyePos, this.eyePos, rotMat);
 
-    glMatrix.mat4.lookAt(this.viewMatrix, this.eyePos, [0.0, -0.0, 0.0], [0.0, 1.0, 0.0]);
+    glMatrix.mat4.lookAt(this.viewMatrix, this.eyePos, [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     // Set clear color to black, fully opaque
@@ -379,20 +381,19 @@ class Renderer {
   }
 
   update_uniforms = () => {
-    this.gl.uniform3f(this.quad_program_uni.iResolution, this.canvas.width, this.canvas.height, 0.0);
+    this.gl.uniform4f(this.quad_program_uni.viewParams, this.viewParams[0], this.viewParams[1], this.viewParams[2], this.viewParams[3]);
     this.gl.uniform1i(this.quad_program_uni.iNumPrimitives, this.primitives.length);
     this.gl.uniform1i(this.quad_program_uni.iNumMaterials, this.materials.length);
     this.gl.uniform1i(this.quad_program_uni.iNumLights, this.lights.length);
 
-    let viewProjectionMatrix = this.projectionMatrix;
-    glMatrix.mat4.multiply(viewProjectionMatrix, viewProjectionMatrix, this.viewMatrix);
+    let viewMat = this.viewMatrix;
     let vp = new Float32Array([
-      viewProjectionMatrix[0], viewProjectionMatrix[1], viewProjectionMatrix[2], viewProjectionMatrix[3],
-      viewProjectionMatrix[4], viewProjectionMatrix[5], viewProjectionMatrix[6], viewProjectionMatrix[7],
-      viewProjectionMatrix[8], viewProjectionMatrix[9], viewProjectionMatrix[10], viewProjectionMatrix[11],
-      viewProjectionMatrix[12], viewProjectionMatrix[13], viewProjectionMatrix[14], viewProjectionMatrix[15],
+      viewMat[0], viewMat[1], viewMat[2], viewMat[3],
+      viewMat[4], viewMat[5], viewMat[6], viewMat[7],
+      viewMat[8], viewMat[9], viewMat[10], viewMat[11],
+      viewMat[12], viewMat[13], viewMat[14], viewMat[15],
     ]);
-    this.gl.uniformMatrix4fv(this.quad_program_uni.viewProjectionMatrix, false, vp);
+    this.gl.uniformMatrix4fv(this.quad_program_uni.viewMatrix, false, vp);
   }
 
 }

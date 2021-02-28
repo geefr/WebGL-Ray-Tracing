@@ -6,10 +6,9 @@ precision highp float;
 // - Diagonal red stripes: Intersections aren't sorted / depth ordering problem
 // #define DEBUG
 
-// Enable shadows
+// Enable features
 #define ENABLE_SHADOWS
-
-// Enable patterns
+#define ENABLE_REFLECTIONS
 // TODO: This really requires uv calculations for each primitive, and those aren't implemented yet
 #define ENABLE_PATTERNS
 
@@ -52,10 +51,10 @@ struct Light {
 };
 
 struct Material {
-  vec4 ambient;    // rgb_
-  vec4 diffuse;    // rgb_
+  vec4 ambient;    // rgba
+  vec4 diffuse;    // rgba
   vec4 specular;   // rgbs, s=shininess
-  vec4 pad;
+  vec4 phys;       // rti_, r=reflectivity, t=transparency, i=refractive index
 };
 
 // Upper limits for scene objects
@@ -81,9 +80,11 @@ out vec4 fragColor;
 //// Limits and constants
 // The maximum number of intersections for a single ray (Because glsl can't have dynamic arrays)
 const int limit_in_per_ray_max = 10;
+const int limit_reflection_depth = 5;
 const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
 const float limit_float_max = 1e19;
 const float limit_epsilon = 1e-12;
+const float limit_acne_factor = 100.0 * limit_epsilon;
 
 //// Data Types (That aren't uniforms)
 // A ray, starting at origin, travelling along direction
@@ -101,6 +102,7 @@ struct Intersection {
   vec4 pos;    // Intersection position
   vec4 eye;    // Intersection -> eye vector
   vec4 normal; // Intersection normal
+  vec4 ray_reflect; // Direction of reflected ray
   vec2 uv;     // Intersection texture coord on primitive
 };
 
@@ -369,12 +371,13 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
   } else {
     i.inside = false;
   }
+
+  i.ray_reflect = reflect(r.direction, i.normal);
   // Note: DO NOT compute shadows in here unless you want infinite recursion in your shader ;)
 }
 
 void compute_intersection_data_first( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
 void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
-
 
 // Compute whether a shadow is cast for a given intersection & light
 // Note: previous attempt pre-calculated this for the intersection,
@@ -394,14 +397,14 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
   // our ray then an object is causing a shadow.
   float l_distance = distance(intersection.pos, l.position);
 
-  float acne_factor = limit_epsilon * 2.0;
   Ray shadow_ray;
-  shadow_ray.origin = intersection.pos + (acne_factor * intersection.normal);
+  shadow_ray.origin = intersection.pos + (limit_acne_factor * intersection.normal);
   shadow_ray.direction = vector_light(intersection.pos, l);
 
   Intersection shadow_intersections[limit_in_per_ray_max];
   init_intersections(shadow_intersections);
   ray_intersect_all(shadow_ray, shadow_intersections);
+  // TODO: PERF: Noticed we don't sort the intersections here at all. would it be faster if we did?
 
   for( int i = 0; i < limit_in_per_ray_max; i++ ) {
     Intersection shadow_intersect = shadow_intersections[i];
@@ -443,10 +446,30 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
   return false;
 }
 
+// Cast a ray along hit's reflection vector and find the next hit
+// Return true if there's a reflected hit, false otherwise
+// Populate reflected_hit with the new hit's parameters
+bool compute_reflection(Intersection hit, out Intersection reflected_hit) {
+#ifdef ENABLE_REFLECTIONS
+  Ray r;
+
+  r.origin = hit.pos + (limit_acne_factor * hit.normal);
+  r.direction = hit.ray_reflect;
+
+  Intersection reflect_intersections[limit_in_per_ray_max];
+  init_intersections(reflect_intersections);
+  ray_intersect_all(r, reflect_intersections);
+  sort_intersections(reflect_intersections);
+  compute_intersection_data_all(r, reflect_intersections );
+
+  return get_hit_sorted(reflect_intersections, reflected_hit, false);
+#endif
+  return false;
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Shading functions
-vec4 shade_phong( Intersection hit ) {
+vec4 shade_phong( Intersection hit, bool enable_shadows ) {
   // Phong model, calculated in world space
   Material m = primitive_material(hit.i);
 
@@ -479,7 +502,7 @@ vec4 shade_phong( Intersection hit ) {
       //
       // Check if the light is blocked (in shadow)
       // If so diffuse and specular are zero
-      if( compute_shadow_cast( hit, light ) ) {
+      if( enable_shadows && compute_shadow_cast( hit, light ) ) {
         continue;
       }
       
@@ -576,6 +599,37 @@ void main() {
     return;
   }
 
-  // And render
-  fragColor = shade_phong( hit );
+  // Shade the main hit
+  vec4 shade = shade_phong( hit, true );
+
+#ifdef ENABLE_REFLECTIONS
+  // Reflect until we hit a non-reflective surface, or hit the reflection limit
+  Material m = primitive_material(hit.i);
+  Material reflected_m = primitive_material(hit.i);
+  Intersection current_hit = hit;
+  Intersection reflected_hit = hit;
+  int reflection_depth = 0;
+  while(reflected_m.phys.x != 0.0 && reflection_depth < limit_reflection_depth) {
+    if( !compute_reflection(current_hit, reflected_hit) ) {
+      // We failed to hit anything
+      // - Ray heads off into the ether
+      // - Or some other failure state, probably a few here
+      break;
+    }
+
+    current_hit = reflected_hit;
+    reflected_m = primitive_material(reflected_hit.i);
+
+    reflection_depth++;
+  }
+
+  // Shade the reflection - But with shadows disabled, this is slow enough already
+  // Mix based on the reflectivity of the main surface
+  if( reflection_depth > 0 ) {
+    vec4 reflected_shade = shade_phong( current_hit, false );
+    shade = mix(shade, reflected_shade, m.phys.x);
+  }
+#endif
+
+  fragColor = shade;
 }

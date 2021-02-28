@@ -112,7 +112,7 @@ class Renderer {
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
 
-    this.eyePos = [0.0, 6.0, -25.0, 1.0];
+    this.eyePos = [25.0, 6.0, -25.0, 1.0];
 
     this.initialised = true;
   }
@@ -143,6 +143,15 @@ class Renderer {
     glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
     glMatrix.vec4.multiply(m.specular, m.specular, [0.2, 0.2, 0.2, 1.0]);
     m.specular[3] = 1.0;
+    this.materials.push(m);
+
+    m = new Material();
+    baseColour = [0.9, 0.9, 0.9, 1.0];
+    glMatrix.vec4.multiply(m.ambient, m.ambient, baseColour);
+    glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
+    glMatrix.vec4.multiply(m.specular, m.specular, [0.2, 0.2, 0.2, 1.0]);
+    m.specular[3] = 1.0;
+    m.set_reflectivity(1.0);
     this.materials.push(m);
 
     this.lights = [];
@@ -195,7 +204,7 @@ class Renderer {
     
     // floor
     p = new PlaneXZ();
-    p.set_material(3);
+    p.set_material(4);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 0.0]);
     // glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, 15.0 * (Math.PI / 180.0));
     // p.set_pattern_type(1);
@@ -220,7 +229,7 @@ class Renderer {
 
     // z walls
     p = new PlaneXZ();
-    p.set_material(3);
+    p.set_material(4);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 50.0]);
     glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, -90.0 * (Math.PI / 180.0));
     p.set_pattern_type(1);
@@ -260,7 +269,7 @@ class Renderer {
     //   vec4 ambient;    // rgb_
     //   vec4 diffuse;    // rgb_
     //   vec4 specular;   // rgbs, s=shininess
-    //   vec4 pad;
+    //   vec4 phys;       // rti_, r=reflectivity, t=transparency, i=refractive index
     // };
     //
     // layout (std140) uniform ubo_0
@@ -344,6 +353,11 @@ class Renderer {
       data[offset++] = m.specular[1];
       data[offset++] = m.specular[2];
       data[offset++] = m.specular[3];
+
+      data[offset++] = m.phys[0];
+      data[offset++] = m.phys[1];
+      data[offset++] = m.phys[2];
+      data[offset++] = m.phys[3];
     }
 
     for(let i = 0; i < num_primitives; i++) {
@@ -398,7 +412,7 @@ class Renderer {
     this.viewMatrix = glMatrix.mat4.create();
     this.viewParams = [this.canvas.width, this.canvas.height, fov * (Math.PI / 180.0), nearZ];
 
-    const eyeRot = 0.005;
+    const eyeRot = 0.0; //0.005;
     let rotMat = glMatrix.mat4.create();
     glMatrix.mat4.rotateY(rotMat, rotMat, eyeRot);
     // glMatrix.mat4.rotateX(rotMat, rotMat, eyeRot);

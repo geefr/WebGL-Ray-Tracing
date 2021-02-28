@@ -9,6 +9,12 @@ precision highp float;
 // Enable shadows
 #define ENABLE_SHADOWS
 
+// Enable patterns
+// TODO: This really requires uv calculations for each primitive, and those aren't implemented yet
+#define ENABLE_PATTERNS
+
+#define PI 3.1415926538
+
 in vec3 fragPos;
 in vec2 vUV;
 
@@ -17,21 +23,6 @@ uniform vec4 viewParams;
 
 uniform mat4 viewMatrix;
 
-// Shadertoy uniforms
-// TODO: Should add most of these in, but do it in a ubo if possible (may be close to the limit on some systems?)
-// uniform vec3 iResolution;           // viewport resolution (in pixels)
-// uniform float     iTime;                 // shader playback time (in seconds)
-// uniform float     iTimeDelta;            // render time (in seconds)
-// uniform int       iFrame;                // shader playback frame
-// uniform float     iChannelTime[4];       // channel playback time (in seconds)
-// uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
-// uniform vec4      iDate;                 // (year, month, day, time in seconds)
-// uniform float     iSampleRate;           // sound sample rate (i.e., 44100)
-// uniform vec3      iChannelResolution[4]; // Resolution of input channels
-// uniform sampler2D iChannel0;             // Input channels (For audio in this case)
-
-
-
 // A primitive / object
 // - modelMatrix
 // - meta.x - The type
@@ -39,14 +30,16 @@ uniform mat4 viewMatrix;
 //   - 2 - The XZ Plane
 //   - If more types added update compute_intersection_data, mainImage, and any other places is_sphere is called
 // - meta.y - Material index from ubo_0.materials
-// 
-// meta.zw - Unused for now
-// Primitive intentionally only uses floats here, to simplify the buffer upload in js
-// Try not to go over 16 KB of ubo - For (older?) intel chips
+// - meta.z - Material pattern type
+// - meta.w - Unused
+//
+// Pattern types
+// - 0.0: disabled
+// - 1.0: stripes/dots. Pattern.xy -> Multiplier for x/y coords. 0.0 to disable axis, 1.0 to get gradient. Gradient applied to ambient and diffuse.
 struct Primitive {
   mat4 modelMatrix;
   vec4 meta;
-  vec4 pad1;
+  vec4 pattern;
   vec4 pad2;
   vec4 pad3;
 };
@@ -108,6 +101,7 @@ struct Intersection {
   vec4 pos;    // Intersection position
   vec4 eye;    // Intersection -> eye vector
   vec4 normal; // Intersection normal
+  vec2 uv;     // Intersection texture coord on primitive
 };
 
 //// Ray functions
@@ -125,6 +119,36 @@ Ray ray_tf_world_to_model(Ray r, mat4 modelMatrix) {
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Primitive Functions - Utility methods for primitive, plus intersections
 Material primitive_material(int i) { return materials[int(primitives[i].meta.y)]; }
+
+#ifdef ENABLE_PATTERNS
+vec4 pattern_stripedots(vec4 c, vec2 uv, vec4 pattern) {
+  float x_mult = pattern.x;
+  float y_mult = pattern.y;
+  float x_mix = sin(uv.x * x_mult);
+  float y_mix = sin(uv.y * y_mult);
+  vec4 result = vec4(0.0, 0.0, 0.0, 1.0);
+
+  if( x_mult > 0.0 ) {
+    result += mix(vec4(0.0, 0.0, 0.0, 1.0), c, x_mix);
+  }
+  if( y_mult > 0.0 ) {
+    result += mix(vec4(0.0, 0.0, 0.0, 1.0), c, y_mix);
+  }
+  if( x_mult > 0.0 && y_mult > 0.0 ) {
+    result /= 2.0;
+  }
+  return result;
+}
+
+// Apply a pattern to a given colour
+vec4 primitive_pattern(int i, vec4 c, vec2 uv) {
+  if( primitives[i].meta.z == 1.0 ) {
+    return pattern_stripedots(c, uv, primitives[i].pattern);
+  }
+  return c;
+}
+#endif
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Sphere functions
 bool is_sphere(int i) { return primitives[i].meta.x == 1.0; }
@@ -153,10 +177,27 @@ int sphere_intersect(int i, Ray ray, out Intersection[2] intersections) {
   float t1 = (-b - sqrt(discriminant)) / (2.0 * a);
   float t2 = (-b + sqrt(discriminant)) / (2.0 * a);
 
+  int num_intersections = 0;
   intersections[0].i = i; intersections[1].i = i;
-  if( abs(t1 - t2) < limit_epsilon ) { intersections[0].t = t1; intersections[1].t = t2; return 1; }
-  else if( t1 < t2 ) { intersections[0].t = t1; intersections[1].t = t2; return 2; }
-  else if( t2 < t1 ) { intersections[0].t = t2; intersections[1].t = t1; return 2; }
+  if( abs(t1 - t2) < limit_epsilon ) { intersections[0].t = t1; intersections[1].t = t2; num_intersections = 1; }
+  else if( t1 < t2 ) { intersections[0].t = t1; intersections[1].t = t2; num_intersections = 2; }
+  else if( t2 < t1 ) { intersections[0].t = t2; intersections[1].t = t1; num_intersections = 2; }
+
+  // Calculate uv
+  // TODO: PERF: Duplicate calculation of p
+  vec4 p0 = ray_to_position(r, t1);
+  vec2 uv0;
+  uv0.y = acos(p0.x / p0.y);
+  uv0.x = acos(p0.y);
+  intersections[0].uv = uv0;
+
+  vec4 p1 = ray_to_position(r, t2);
+  vec2 uv1;
+  uv1.y = acos(p1.x / p1.y);
+  uv1.x = acos(p1.y);
+  intersections[1].uv = uv1;
+
+  return num_intersections;
 }
 
 // Surface normal for sphere at point p (on surface of sphere, in world space)
@@ -187,6 +228,14 @@ bool plane_xz_intersect(int i, Ray ray, out Intersection intersection) {
   float t = (- r.origin.y) / r.direction.y;
   intersection.i = i;
   intersection.t = t;
+
+  // Calculate uv
+  // TODO: PERF: Duplicate calculation of p
+  // This is an infinite plane, so tile around 10x10
+  vec4 p = ray_to_position(r, t);
+  intersection.uv.x = p.x / 10.0;
+  intersection.uv.y = p.z / 10.0;
+
   return true;
 }
 
@@ -411,7 +460,11 @@ vec4 shade_phong( Intersection hit ) {
     vec4 s = vector_light_reflected(i, hit.normal);
 
     // Ambient component
-    shade += (m.ambient * light.intensity);
+#ifdef ENABLE_PATTERNS
+    shade += (primitive_pattern(hit.i, m.ambient, hit.uv) * light.intensity);
+#else
+    shade += m.ambient * light.intensity;
+#endif
 
     // Angle between light and surface normal
     float i_n = dot(i, hit.normal);
@@ -431,7 +484,11 @@ vec4 shade_phong( Intersection hit ) {
       }
       
       // Diffuse component
-      shade += (m.diffuse * light.intensity * i_n);
+#ifdef ENABLE_PATTERNS
+      shade += (primitive_pattern(hit.i, m.diffuse, hit.uv) * light.intensity * i_n);
+#else
+      shade += m.diffuse * light.intensity * i_n;
+#endif
 
       // Specular component
       float s_e = dot(s, hit.eye);

@@ -143,7 +143,7 @@ class Renderer {
     l = new PointLight();
     l.position = [-50.0, 0.0, 0.0, 1.0];
     // l.intensity = [0.5, 1.0, 0.5, 1.0];
-    l.cast_shadows = false;
+    l.cast_shadows = true;
     this.lights.push(l);
 
     l = new PointLight();
@@ -154,10 +154,18 @@ class Renderer {
 
     this.primitives = [];
     let p = new Sphere();
+
     // bigboi
     p.set_material(2);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-5.0, 0.0, 0.0]);
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.5, 0.5 , 0.5]);
+    this.primitives.push(p);
+
+    // groundboi
+    p = new Sphere();
+    p.set_material(1);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -10.0, 0.0]);
+    // glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [10.0, 10.0, 10.0]);
     this.primitives.push(p);
 
     // smolboi
@@ -167,12 +175,6 @@ class Renderer {
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [0.25, 0.25 , 0.25]);
     this.primitives.push(p);
 
-    // groundboi
-    p = new Sphere();
-    p.set_material(1);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -20.0, 0.0]);
-    // glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [10.0, 10.0, 10.0]);
-    this.primitives.push(p);
   }
 
   upload_ubo_0 = (blockIndex) => {

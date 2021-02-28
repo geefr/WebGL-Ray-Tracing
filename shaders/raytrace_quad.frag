@@ -2,6 +2,10 @@
 
 precision highp float;
 
+// Enable error indicators
+// - Diagonal red stripes: Intersections aren't sorted / depth ordering problem
+#define DEBUG
+
 in vec3 fragPos;
 in vec2 vUV;
 
@@ -185,7 +189,7 @@ int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections
 }
 
 // A simple sort, nothing fancy, probably not fast
-void sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
+void sort_intersections( inout Intersection[limit_in_per_ray_max] intersections ) {
   Intersection result[limit_in_per_ray_max];
   for( int out_i = 0; out_i < limit_in_per_ray_max - 1; out_i++ ) {
     int smallest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
@@ -216,58 +220,26 @@ void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersec
 
 // Determine which intersection is the 'hit' - Smallest non-negative t
 // Requires that intersections be sorted before calling
-bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit ) {
+// if allow_inside == true both inner and outer surfaces will be returned
+bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit, bool allow_inside ) {
   bool result = false;
-  hit = intersections[0];
-  if( hit.t == limit_inf ||
-      hit.t <  0.0 ) {
-        return false;
-  } else {
-    return true;
-  }
-}
-
-// Compute whether a shadow is cast for a given intersection & light
-// Note: previous attempt pre-calculated this for the intersection,
-// but required assignment to element in array (intersection.shadow_casters[i])
-// Turns out that's a problem causes https://stackoverflow.com/questions/60984733/warning-x3550-array-reference-cannot-be-used-as-an-l-value
-//
-// PERF: Shadows will be expensive
-bool compute_shadow_cast( Intersection intersection, Light l ) {
-  if( l.shadow.x == 0.0 ) {
-    // This light doesn't cast shadows, skip
-    return false;
-  }
-
-  // Okay, need to check for shadow, down the performance hole we go!
-  // Distance from intersection to light - If a hit is closer than this along
-  // our ray then an object is causing a shadow.
-  float l_distance = distance(intersection.pos, l.position);
-
-  // Start the ray just above the surface, to avoid acne (Self-shadows)
-  // TODO: Alternate: Perform intersections, but ignore any hits on 
-  // primitives[intersection.i].
-  float fudge_factor = limit_epsilon * 10.0;
-
-  Ray shadow_ray;
-  shadow_ray.origin = intersection.pos + (intersection.normal * fudge_factor);
-  shadow_ray.direction = vector_light(intersection.pos, l);
-
-  Intersection shadow_intersections[limit_in_per_ray_max];
-  init_intersections(shadow_intersections);
-  ray_intersect_all(shadow_ray, shadow_intersections);
 
   for( int i = 0; i < limit_in_per_ray_max; i++ ) {
-    Intersection shadow_intersect = shadow_intersections[i];
-    if( shadow_intersect.i == intersection.i ) {
-      continue;
+    hit = intersections[i];
+    if( hit.t == limit_inf ||
+        hit.t < 0.0 ) {
+          // Invalid, or behind the ray's origin
+          continue;
     }
 
-    if( shadow_intersect.t < l_distance ) {
-      return true;
+    if( allow_inside == false &&
+        hit.inside   == true ) {
+          continue;
     }
+
+    // This is the first valid intersection on the ray
+    return true;
   }
-  return false;
 }
 
 // Pre-compute common vectors used during shading, fill in gaps in existing hit
@@ -299,6 +271,71 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
 void compute_intersection_data_first( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
 void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
 */
+
+// Compute whether a shadow is cast for a given intersection & light
+// Note: previous attempt pre-calculated this for the intersection,
+// but required assignment to element in array (intersection.shadow_casters[i])
+// Turns out that's a problem causes https://stackoverflow.com/questions/60984733/warning-x3550-array-reference-cannot-be-used-as-an-l-value
+//
+// PERF: Shadows will be expensive
+bool compute_shadow_cast( Intersection intersection, Light l ) {
+  if( l.shadow.x == 0.0 ) {
+    // This light doesn't cast shadows, skip
+    return false;
+  }
+
+  // TODO: Thought this was the cause of shadows on object rears but it's not
+  // Any surface with a normal pointing away from the light
+  // cannot have shadows cast upon it by the light
+  vec4 l_v = vector_light(intersection.pos, l);
+  // float l_n = dot(l_v, intersection.normal);
+  // if( l_n < 0.0 ) {
+  //   return false;
+  // }
+
+  // Okay, need to check for shadow, down the performance hole we go!
+  // Distance from intersection to light - If a hit is closer than this along
+  // our ray then an object is causing a shadow.
+  float l_distance = distance(intersection.pos, l.position);
+
+  Ray shadow_ray;
+  shadow_ray.origin = intersection.pos;
+  shadow_ray.direction = l_v;
+
+  Intersection shadow_intersections[limit_in_per_ray_max];
+  init_intersections(shadow_intersections);
+  ray_intersect_all(shadow_ray, shadow_intersections);
+
+  for( int i = 0; i < limit_in_per_ray_max; i++ ) {
+    Intersection shadow_intersect = shadow_intersections[i];
+    // intersection needs to be populated to determing if it should
+    // cast shadows.
+    // TODO: PERF: Think we just need a subset of this here, so
+    // could save a few cycles
+    compute_intersection_data(shadow_ray, shadow_intersect);
+
+    // No object may cast a shadow on itself
+    if( shadow_intersect.i == intersection.i ) {
+      continue;
+    }
+
+    // Inner surfaces may not cast shadows (But may have shadows cast upon them)
+    if( shadow_intersect.inside == false ) {
+      continue;
+    }
+
+    // vec4 p = ray_to_position( shadow_ray, shadow_intersect.t );
+    // if( distance(intersection.pos, p) < l_distance) {
+    //   return true;
+    // }
+
+    if( shadow_intersect.t < l_distance ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Shading functions
@@ -376,10 +413,24 @@ void main() {
 
   sort_intersections( intersections );
 
+#ifdef DEBUG
+  float t = - limit_float_max;
+  for( int i = 0; i < limit_in_per_ray_max - 1; i++ ) {
+    Intersection current = intersections[i];
+    Intersection next = intersections[i + 1];
+    if( next.t < current.t ) {
+      fragColor = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), sin(400.0 * distance(vUV, vec2(0.0, 0.0))));
+      return;
+    }
+  }
+#endif
+
   // Work out the hit
+  // Choosing not to render inner surfaces here
+  // This solves some render noise in tangent cases.
   Intersection hit;
   init_intersection(hit);
-  if( !get_hit_sorted(intersections, hit) ) {
+  if( !get_hit_sorted(intersections, hit, false) ) {
     fragColor = background_color();
     return;
   }
@@ -388,5 +439,4 @@ void main() {
 
   // And render
   fragColor = shade_phong( hit );
-
 }

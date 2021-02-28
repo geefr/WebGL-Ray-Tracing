@@ -41,16 +41,22 @@ struct Primitive {
 struct Light {
   vec4 intensity;  // rgb_
   vec4 position;   // xyz1 (TODO: Support for directional lights)
-  vec4 pad1;
-  vec4 pad2;
+  vec4 shadow;     // Cast shadows if x != 0.0, yzw unused
+  vec4 pad;
 };
 
 struct Material {
   vec4 ambient;    // rgb_
   vec4 diffuse;    // rgb_
   vec4 specular;   // rgbs, s=shininess
-  vec4 pad1;
+  vec4 pad;
 };
+
+// Upper limits for scene objects
+const int max_iNumPrimitives = 20;
+const int max_iNumMaterials = 8;
+// THERE ARE FOUR LIGHTS!
+const int max_iNumLights = 4;
 
 uniform int iNumPrimitives;
 uniform int iNumMaterials;
@@ -58,9 +64,9 @@ uniform int iNumLights;
 // This block only contains the primitives, to simplify the buffer upload in js
 layout (std140) uniform ubo_0
 {
-  Light lights[10];
-  Material materials[10];
-  Primitive primitives[40];
+  Light lights[max_iNumLights];
+  Material materials[max_iNumMaterials];
+  Primitive primitives[max_iNumPrimitives];
 } ;
 
 out vec4 fragColor;
@@ -71,7 +77,7 @@ out vec4 fragColor;
 const int limit_in_per_ray_max = 10;
 const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
 const float limit_float_max = 1e19;
-const float limit_epsilon = 1e-6;
+const float limit_epsilon = 1e-12;
 
 //// Data Types (That aren't uniforms)
 // A ray, starting at origin, travelling along direction
@@ -160,8 +166,11 @@ vec4 vector_light( vec4 p, Light l ) { return normalize(l.position - p); }
 vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n)); }
 
 // Initialise intersections to insane values (t=inf)
-void init_intersection( out Intersection intersection ) { intersection.i = 0; intersection.t = limit_inf; }
-void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {intersections[i].i = 0; intersections[i].t = limit_inf;}}
+void init_intersection( out Intersection intersection ) { 
+  intersection.i = 0;
+  intersection.t = limit_inf;
+}
+void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {init_intersection(intersections[i]);}}
 
 int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections, int min_i, int max_i ) {
   int smallest_i = max_i + 1;
@@ -187,6 +196,24 @@ void sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
   }
 }
 
+// Perform ray intersection with every primitive
+void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) {
+  int intersections_insert = 0;
+  
+  // Intersect with each primitive
+  for( int i = 0; i < iNumPrimitives; i++ ) {
+    if( is_sphere(i) ) {
+      Intersection sphere_intersections[2];
+      int ints = sphere_ray_intersect(i, r, sphere_intersections);
+
+      for( int j = 0; j < ints; j++ ) {
+        intersections[intersections_insert] = sphere_intersections[j];
+        intersections_insert++;
+      }
+    }
+  }
+}
+
 // Determine which intersection is the 'hit' - Smallest non-negative t
 // Requires that intersections be sorted before calling
 bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit ) {
@@ -198,6 +225,49 @@ bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Inter
   } else {
     return true;
   }
+}
+
+// Compute whether a shadow is cast for a given intersection & light
+// Note: previous attempt pre-calculated this for the intersection,
+// but required assignment to element in array (intersection.shadow_casters[i])
+// Turns out that's a problem causes https://stackoverflow.com/questions/60984733/warning-x3550-array-reference-cannot-be-used-as-an-l-value
+//
+// PERF: Shadows will be expensive
+bool compute_shadow_cast( Intersection intersection, Light l ) {
+  if( l.shadow.x == 0.0 ) {
+    // This light doesn't cast shadows, skip
+    return false;
+  }
+
+  // Okay, need to check for shadow, down the performance hole we go!
+  // Distance from intersection to light - If a hit is closer than this along
+  // our ray then an object is causing a shadow.
+  float l_distance = distance(intersection.pos, l.position);
+
+  // Start the ray just above the surface, to avoid acne (Self-shadows)
+  // TODO: Alternate: Perform intersections, but ignore any hits on 
+  // primitives[intersection.i].
+  float fudge_factor = limit_epsilon * 10.0;
+
+  Ray shadow_ray;
+  shadow_ray.origin = intersection.pos + (intersection.normal * fudge_factor);
+  shadow_ray.direction = vector_light(intersection.pos, l);
+
+  Intersection shadow_intersections[limit_in_per_ray_max];
+  init_intersections(shadow_intersections);
+  ray_intersect_all(shadow_ray, shadow_intersections);
+
+  for( int i = 0; i < limit_in_per_ray_max; i++ ) {
+    Intersection shadow_intersect = shadow_intersections[i];
+    if( shadow_intersect.i == intersection.i ) {
+      continue;
+    }
+
+    if( shadow_intersect.t < l_distance ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Pre-compute common vectors used during shading, fill in gaps in existing hit
@@ -221,10 +291,14 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
   } else {
     i.inside = false;
   }
+
+  // Note: DO NOT compute shadows in here unless you want infinite recursion in your shader ;)
 }
 
+/*
 void compute_intersection_data_first( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
 void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
+*/
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Shading functions
@@ -243,6 +317,12 @@ vec4 shade_phong( Intersection hit ) {
 
     // Ambient component
     shade += (m.ambient * light.intensity);
+
+    // Check if the light is blocked (in shadow)
+    // If so only the ambient component is used
+    if( compute_shadow_cast( hit, light ) ) {
+      continue;
+    }
 
     // Angle between light and surface normal
     float i_n = dot(i, hit.normal);
@@ -291,20 +371,8 @@ void main() {
   // All of the intersections on this ray
   Intersection intersections[limit_in_per_ray_max];
   init_intersections( intersections );
-  int intersections_insert = 0;
-  
-  // Intersect with each primitive
-  for( int i = 0; i < iNumPrimitives; i++ ) {
-    if( is_sphere(i) ) {
-      Intersection sphere_intersections[2];
-      int ints = sphere_ray_intersect(i, r, sphere_intersections);
 
-      for( int j = 0; j < ints; j++ ) {
-        intersections[intersections_insert] = sphere_intersections[j];
-        intersections_insert++;
-      }
-    }
-  }
+  ray_intersect_all( r, intersections );
 
   sort_intersections( intersections );
 

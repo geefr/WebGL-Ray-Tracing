@@ -112,7 +112,7 @@ class Renderer {
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
 
-    this.eyePos = [0.0, 10.0, -25.0, 1.0];
+    this.eyePos = [0.0, 6.0, -25.0, 1.0];
 
     this.initialised = true;
   }
@@ -159,7 +159,7 @@ class Renderer {
     this.lights.push(l);
 
     l = new PointLight();
-    l.position = [45.0, 20.0, 0.0, 1.0];
+    l.position = [45.0, 10.0, 0.0, 1.0];
     // l.intensity = [1.0, 1.0, 1.0, 1.0];
     l.cast_shadows = true;
     this.lights.push(l);
@@ -176,7 +176,7 @@ class Renderer {
     // hugeboi
     p = new Sphere();
     p.set_material(1);
-    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -8.0, 0.0]);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, -9.0, 0.0]);
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [10.0, 10.0, 10.0]);
     p.set_pattern_type(1);
     p.pattern = [64.0, 0.0, 0.0, 0.0];

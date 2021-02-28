@@ -6,6 +6,7 @@ in vec3 fragPos;
 in vec2 vUV;
 
 // Shadertoy uniforms
+// TODO: Should add most of these in, but do it in a ubo if possible (may be close to the limit on some systems?)
 uniform vec3 iResolution;           // viewport resolution (in pixels)
 // uniform float     iTime;                 // shader playback time (in seconds)
 // uniform float     iTimeDelta;            // render time (in seconds)
@@ -91,26 +92,6 @@ struct Intersection {
 };
 
 //// Ray functions
-// Determine which intersection is the 'hit' - Smallest non-negative t
-bool ray_hit( Intersection[limit_in_per_ray_max] intersections, out Intersection hit ) {
-  hit.t = limit_float_max;
-  bool result = false;
-  for( int i = 0; i < limit_in_per_ray_max; i++ ) {
-    Intersection intersection = intersections[i];
-    if( intersection.t == limit_inf ) {
-      // TODO: PERF: Maybe break on first inf? Requires intersections to be packed at beginning of array
-      continue;
-    }
-    if( intersection.t < 0.0 ) {
-      continue;
-    }
-    if( intersection.t < hit.t ) {
-      hit = intersection;
-      result = true;
-    }
-  }
-  return result;
-}
 vec4 ray_to_position(Ray r, float t) { return r.origin + (r.direction * t); }
 
 Ray ray_tf_world_to_model(Ray r, mat4 modelMatrix) { 
@@ -181,30 +162,44 @@ vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n))
 // Initialise intersections to insane values (t=inf)
 void init_intersection( out Intersection intersection ) { intersection.i = 0; intersection.t = limit_inf; }
 void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {intersections[i].i = 0; intersections[i].t = limit_inf;}}
-// Sort array of intersections by t, ascending
-// TODO: This is broken
-/*
-Intersection[limit_in_per_ray_max] sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
-  // A simple insertion sort, nothing fancy
-  Intersection result[limit_in_per_ray_max];
-  for( int out_i = limit_in_per_ray_max - 1; out_i >= 0; out_i-- ) {
-    Intersection largest;
-    init_intersection(largest);
-    for( int in_i = limit_in_per_ray_max - 1; in_i >= 0; in_i-- ) {
-      Intersection current = intersections[in_i];
-      if( current.t == limit_inf ) {
-        // It's the largest
-        largest = current;
-        break;
-      } else if ( current.t > largest.t ) {
-        largest = current;
-      }
+
+int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections, int min_i, int max_i ) {
+  int smallest_i = max_i + 1;
+  float smallest_t = limit_inf;
+  for( int i = min_i; i < max_i; i++ ) {
+    if( intersections[i].t <= smallest_t ) {
+      smallest_t = intersections[i].t;
+      smallest_i = i;
     }
-    result[out_i] = largest;
   }
-  return result;
+  return smallest_i;
 }
-*/
+
+// A simple sort, nothing fancy, probably not fast
+void sort_intersections( Intersection[limit_in_per_ray_max] intersections ) {
+  Intersection result[limit_in_per_ray_max];
+  for( int out_i = 0; out_i < limit_in_per_ray_max - 1; out_i++ ) {
+    int smallest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
+    // Swap smallest with current element
+    Intersection tmp = intersections[out_i];
+    intersections[out_i] = intersections[smallest_i];
+    intersections[smallest_i] = tmp;
+  }
+}
+
+// Determine which intersection is the 'hit' - Smallest non-negative t
+// Requires that intersections be sorted before calling
+bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit ) {
+  bool result = false;
+  hit = intersections[0];
+  if( hit.t == limit_inf ||
+      hit.t <  0.0 ) {
+        return false;
+  } else {
+    return true;
+  }
+}
+
 // Pre-compute common vectors used during shading, fill in gaps in existing hit
 // Unless this has been called an intersection's data for these will be undefined
 void compute_intersection_data( Ray r, inout Intersection i ) {
@@ -311,12 +306,12 @@ void main() {
     }
   }
 
-//  intersections = sort_intersections( intersections );
+  sort_intersections( intersections );
 
   // Work out the hit
   Intersection hit;
   init_intersection(hit);
-  if( !ray_hit(intersections, hit) ) {
+  if( !get_hit_sorted(intersections, hit) ) {
     fragColor = background_color();
     return;
   }

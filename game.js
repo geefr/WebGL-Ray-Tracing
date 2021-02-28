@@ -47,10 +47,14 @@ class Game {
     if( !this.canvas ) {
       return;
     }
-    this.canvas.style.width = window.innerWidth;
-    this.canvas.style.height = window.innerHeight;
-    this.canvas.width = window.innerWidth;
-    this.canvas.height = window.innerHeight;
+    
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    this.canvas.style.width = w;
+    this.canvas.style.height = h;
+    this.canvas.width = w;
+    this.canvas.height = h;
   }
 }
 

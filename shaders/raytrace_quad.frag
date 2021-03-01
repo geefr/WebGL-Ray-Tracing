@@ -9,6 +9,7 @@ precision highp float;
 // Enable features
 #define ENABLE_SHADOWS
 #define ENABLE_REFLECTIONS
+#define ENABLE_TRANSPARENCY
 // TODO: Patterns need some work - Would be extended to texture support or similar
 #define ENABLE_PATTERNS
 
@@ -81,6 +82,7 @@ out vec4 fragColor;
 // The maximum number of intersections for a single ray (Because glsl can't have dynamic arrays)
 const int limit_in_per_ray_max = 10;
 const int limit_reflection_depth = 4;
+const int limit_transparency_depth = 4;
 const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
 const float limit_float_max = 1e19;
 const float limit_epsilon = 1e-12;
@@ -326,9 +328,7 @@ void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersec
 // Determine which intersection is the 'hit' - Smallest non-negative t
 // Requires that intersections be sorted before calling
 // if allow_inside == true both inner and outer surfaces will be returned
-bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit, bool allow_inside, bool allow_self, int self_i ) {
-  bool result = false;
-
+bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit, bool allow_inside, bool allow_self, int self_i, out int hit_index ) {
   for( int i = 0; i < limit_in_per_ray_max; i++ ) {
     hit = intersections[i];
 
@@ -349,8 +349,10 @@ bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Inter
     }
 
     // This is the first valid intersection on the ray
+    hit_index = i;
     return true;
   }
+  return false;
 }
 
 // Pre-compute common vectors used during shading, fill in gaps in existing hit
@@ -468,7 +470,29 @@ bool compute_reflection(Intersection hit, out Intersection reflected_hit) {
   sort_intersections(reflect_intersections);
   compute_intersection_data_all(r, reflect_intersections );
 
-  return get_hit_sorted(reflect_intersections, reflected_hit, false, false, hit.i);
+  int hit_index;
+  return get_hit_sorted(reflect_intersections, reflected_hit, false, false, hit.i, hit_index);
+#endif
+  return false;
+}
+
+bool compute_transparency(Intersection intersections[limit_in_per_ray_max], int current_hit_i, 
+                          out Intersection transparent_hit, out int transparent_hit_i) {
+  // TODO: Will need rework when refraction is implemented
+#ifdef ENABLE_TRANSPARENCY
+  // Assuming we don't have refraction we just need to move along the intersections
+  for( int i = current_hit_i + 1; i < limit_in_per_ray_max; i++ ) {
+    transparent_hit = intersections[i];
+    if( transparent_hit.t == limit_inf || transparent_hit.t < 0.0 ) {
+      continue;
+    }
+
+    // This is the next intersection on the ray
+    // Either it's leaving the transparent object we're inside,
+    // Or hit a new object (which may or may not be transparent)
+    transparent_hit_i = i;
+    return true;
+  }
 #endif
   return false;
 }
@@ -601,7 +625,8 @@ void main() {
   Intersection hit;
   init_intersection(hit);
   // allow_self true as we don't have a 'self' yet (It's a hack, avoid the check in get_hit)
-  if( !get_hit_sorted(intersections, hit, false, true, 0) ) {
+  int hit_index = -1;
+  if( !get_hit_sorted(intersections, hit, false, true, 0, hit_index) ) {
     fragColor = vec4(1.0, 0.0, 1.0, 1.0);
     return;
   }
@@ -611,35 +636,73 @@ void main() {
 
 #ifdef ENABLE_REFLECTIONS
   // Reflect until we hit a non-reflective surface, or hit the reflection limit
- 
-  Material current_m = primitive_material(hit.i);
-  Intersection current_hit = hit;
-  Intersection reflected_hit = hit;
-  int reflection_depth = 0;
-  while(current_m.phys.x != 0.0) {
-    if( !compute_reflection(current_hit, reflected_hit) ) {
-      // We failed to hit anything
-      // - Ray heads off into the ether
-      // - Or some other failure state, probably a few here
-      break;
+  {
+    Material current_m = primitive_material(hit.i);
+    Intersection current_hit = hit;
+    Intersection reflected_hit = hit;
+    int reflection_depth = 0;
+    while(current_m.phys.x != 0.0) {
+      if( !compute_reflection(current_hit, reflected_hit) ) {
+        // We failed to hit anything
+        // - Ray heads off into the ether
+        // - Or some other failure state, probably a few here
+        break;
+      }
+
+      // Shade the reflection - But with shadows disabled, this is slow enough already
+      // Mix based on the reflectivity of the current surface
+      vec4 reflected_shade = shade_phong( reflected_hit, false );
+      shade = mix(shade, reflected_shade, current_m.phys.x);
+
+      current_hit = reflected_hit;
+      current_m = primitive_material(current_hit.i);
+
+      reflection_depth++;
+      
+      if( reflection_depth == limit_reflection_depth ) {
+        // We can't go any further.
+        // We could fade out here or do something fancy, the attempted options all look bad.
+        // TODO: Fog would be a nice way to hide this. Maybe fog over the summed ray distance?
+        // Either way we're done processing.
+        break;
+      }
     }
+  }
+#endif
 
-    // Shade the reflection - But with shadows disabled, this is slow enough already
-    // Mix based on the reflectivity of the current surface
-    vec4 reflected_shade = shade_phong( reflected_hit, false );
-    shade = mix(shade, reflected_shade, current_m.phys.x);
+#ifdef ENABLE_TRANSPARENCY
+  // Handle transparency in a similar way to reflections - Continue along the ray
+  // and shade based on each surface's transparency constant
 
-    current_hit = reflected_hit;
-    current_m = primitive_material(current_hit.i);
+  // TODO: For now refraction doesn't exist. WHen it's added this will need extensive rework
+  {
+    Material current_m = primitive_material(hit.i);
+    Intersection current_hit = hit;
+    Intersection transparent_hit = hit;
+    int transparency_depth = 0;
+    int current_hit_i = hit_index;
+    int transparent_hit_i = hit_index;
+    while(current_m.phys.y != 0.0) {
+      if( !compute_transparency(intersections, current_hit_i, transparent_hit, transparent_hit_i) ) {
+        // We failed to hit anything
+        break;
+      }
 
-    reflection_depth++;
+      // Shade the next hit on the ray, shadows disabled
+      // Mix based on transparency of the current surface
+      vec4 transparent_shade = shade_phong( transparent_hit, false );
+      shade = mix(shade, transparent_shade, current_m.phys.y);
 
-    if( reflection_depth == limit_reflection_depth ) {
-      // We can't go any further. If the current surface is still reflective
-      // we don't have much of a choice here - Apply some fudge factor to the final shading
-      // TODO: Fog would be a nice way to hide this. Maybe fog over the summed ray distance?
-      // Either way we're done processing.
-      break;
+      current_hit = transparent_hit;
+      current_hit_i = transparent_hit_i; // TODO: Naming - 'i' is confusing here
+      current_m = primitive_material(current_hit.i);
+
+      transparency_depth++;
+      
+      if( transparency_depth == limit_transparency_depth ) {
+        // We can't go any further.
+        break;
+      }
     }
   }
 #endif

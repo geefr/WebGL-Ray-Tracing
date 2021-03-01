@@ -112,7 +112,7 @@ class Renderer {
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
 
-    this.eyePos = [15.0, 20.0, 0.0, 1.0];
+    this.eyePos = [16.0, 10.0, 0.0, 1.0];
 
     this.initialised = true;
   }
@@ -163,6 +163,22 @@ class Renderer {
     m.set_reflectivity(1.0);
     this.materials.push(m);
 
+    m = new Material();
+    baseColour = [0.9, 0.1, 0.1, 1.0];
+    glMatrix.vec4.multiply(m.ambient, m.ambient, baseColour);
+    glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
+    m.specular[3] = 8.0;
+    m.set_transparency(0.3);
+    this.materials.push(m);
+
+    m = new Material();
+    baseColour = [0.1, 0.1, 0.9, 1.0];
+    glMatrix.vec4.multiply(m.ambient, m.ambient, baseColour);
+    glMatrix.vec4.multiply(m.diffuse, m.diffuse, baseColour);
+    m.specular[3] = 16.0;
+    m.set_transparency(0.7);
+    this.materials.push(m);
+
     this.lights = [];
     let l = new PointLight();
     l.position = [0.0, 30.0, 0.0, 1.0];
@@ -189,6 +205,18 @@ class Renderer {
     p.set_material(5);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-3.0, 2.0, 0.0]);
     glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [2.0, 2.0 , 2.0]);
+    this.primitives.push(p);
+
+    // transparentboi
+    p = new Sphere();
+    p.set_material(6);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 2.0, 5.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [4.0, 4.0 , 4.0]);
+    this.primitives.push(p);
+    p = new Sphere();
+    p.set_material(7);
+    glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 2.0, -5.0]);
+    glMatrix.mat4.scale(p.modelMatrix, p.modelMatrix, [4.0, 4.0 , 4.0]);
     this.primitives.push(p);
 
     // hugeboi
@@ -222,14 +250,14 @@ class Renderer {
 
     // x walls
     p = new PlaneXZ();
-    p.set_material(4);
+    p.set_material(3);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [50.0, 0.0, 0.0]);
     glMatrix.mat4.rotateZ(p.modelMatrix, p.modelMatrix, 160.0 * (Math.PI / 180.0));
     //p.set_pattern_type(1);
     p.pattern = xwall_pattern;
     this.primitives.push(p);
     p = new PlaneXZ();
-    p.set_material(4);
+    p.set_material(3);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-50.0, 0.0, 0.0]);
     glMatrix.mat4.rotateZ(p.modelMatrix, p.modelMatrix, -160.0 * (Math.PI / 180.0));
     //p.set_pattern_type(1);
@@ -238,14 +266,14 @@ class Renderer {
 
     // z walls
     p = new PlaneXZ();
-    p.set_material(4);
+    p.set_material(3);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 50.0]);
     glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, -160.0 * (Math.PI / 180.0));
     //p.set_pattern_type(1);
     p.pattern = zwall_pattern;
     this.primitives.push(p);
     p = new PlaneXZ();
-    p.set_material(4);
+    p.set_material(3);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, -50.0]);
     glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, 160.0 * (Math.PI / 180.0));
     //p.set_pattern_type(1);

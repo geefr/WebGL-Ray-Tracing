@@ -126,9 +126,9 @@ public:
       0.0, 0.0
     };
     glCreateBuffers(1, &quad_vbo_uv);
-    glBindBuffer(GL_ARRAY_BUFFER, quad_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, quad_vbo_uv);
     glBufferData(GL_ARRAY_BUFFER, sizeof(texCoords), texCoords, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 2, GL_FLOAT, false, 0, 0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, 0);
     glEnableVertexAttribArray(1);
 
     // Uniform locations & buffers
@@ -490,36 +490,88 @@ glm::mat4 viewMatrix;
 
   void update_uniforms()
   {
-    glUniform4fv(quad_program_uni["viewParams"], sizeof(viewParams), viewParams.data());
+    glUniform4f(quad_program_uni["viewParams"],
+      viewParams[0],
+      viewParams[1],
+      viewParams[2],
+      viewParams[3]
+    );
+
     glUniform1i(quad_program_uni["iNumPrimitives"], primitives.size());
     glUniform1i(quad_program_uni["iNumMaterials"], materials.size());
     glUniform1i(quad_program_uni["iNumLights"], lights.size());
 
     glUniformMatrix4fv(quad_program_uni["viewMatrix"], 1, false, glm::value_ptr(viewMatrix));
   }
-
-  void render(GLFWwindow *window)
-  {
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
-  }
 };
+
+void APIENTRY glDebugOutput(GLenum source, 
+                            GLenum type, 
+                            unsigned int id, 
+                            GLenum severity, 
+                            GLsizei length, 
+                            const char *message, 
+                            const void *userParam)
+{
+    // ignore non-significant error/warning codes
+    if(id == 131169 || id == 131185 || id == 131218 || id == 131204) return; 
+
+    std::cout << "---------------" << std::endl;
+    std::cout << "Debug message (" << id << "): " <<  message << std::endl;
+
+    switch (source)
+    {
+        case GL_DEBUG_SOURCE_API:             std::cout << "Source: API"; break;
+        case GL_DEBUG_SOURCE_WINDOW_SYSTEM:   std::cout << "Source: Window System"; break;
+        case GL_DEBUG_SOURCE_SHADER_COMPILER: std::cout << "Source: Shader Compiler"; break;
+        case GL_DEBUG_SOURCE_THIRD_PARTY:     std::cout << "Source: Third Party"; break;
+        case GL_DEBUG_SOURCE_APPLICATION:     std::cout << "Source: Application"; break;
+        case GL_DEBUG_SOURCE_OTHER:           std::cout << "Source: Other"; break;
+    } std::cout << std::endl;
+
+    switch (type)
+    {
+        case GL_DEBUG_TYPE_ERROR:               std::cout << "Type: Error"; break;
+        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: std::cout << "Type: Deprecated Behaviour"; break;
+        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:  std::cout << "Type: Undefined Behaviour"; break; 
+        case GL_DEBUG_TYPE_PORTABILITY:         std::cout << "Type: Portability"; break;
+        case GL_DEBUG_TYPE_PERFORMANCE:         std::cout << "Type: Performance"; break;
+        case GL_DEBUG_TYPE_MARKER:              std::cout << "Type: Marker"; break;
+        case GL_DEBUG_TYPE_PUSH_GROUP:          std::cout << "Type: Push Group"; break;
+        case GL_DEBUG_TYPE_POP_GROUP:           std::cout << "Type: Pop Group"; break;
+        case GL_DEBUG_TYPE_OTHER:               std::cout << "Type: Other"; break;
+    } std::cout << std::endl;
+    
+    switch (severity)
+    {
+        case GL_DEBUG_SEVERITY_HIGH:         std::cout << "Severity: high"; break;
+        case GL_DEBUG_SEVERITY_MEDIUM:       std::cout << "Severity: medium"; break;
+        case GL_DEBUG_SEVERITY_LOW:          std::cout << "Severity: low"; break;
+        case GL_DEBUG_SEVERITY_NOTIFICATION: std::cout << "Severity: notification"; break;
+    } std::cout << std::endl;
+    std::cout << std::endl;
+}
 
 int main(void)
 {
   GLFWwindow *window;
 
   glfwSetErrorCallback(error_callback);
+  
 
   if (!glfwInit())
     exit(EXIT_FAILURE);
 
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   // glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
   glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+  glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);  
 
-  window = glfwCreateWindow(1280, 1024, "Web Tracing CeePlusPlus", NULL, NULL);
+  auto w = 200;
+  auto h = 200;
+  window = glfwCreateWindow(w, h, "Web Tracing CeePlusPlus", NULL, NULL);
   if (!window)
   {
     glfwTerminate();
@@ -528,13 +580,27 @@ int main(void)
 
   glfwMakeContextCurrent(window);
 
+  int flags; glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+if (flags & GL_CONTEXT_FLAG_DEBUG_BIT)
+{
+    // initialize debug output 
+}
+if (flags & GL_CONTEXT_FLAG_DEBUG_BIT)
+{
+    glEnable(GL_DEBUG_OUTPUT);
+    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); 
+    glDebugMessageCallback(glDebugOutput, nullptr);
+    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
+} 
+
+
   glfwSetKeyCallback(window, key_callback);
 
-  Renderer renderer(1280, 1024);
+  Renderer renderer(w, h);
 
   while (!glfwWindowShouldClose(window))
   {
-    renderer.render(window);
+    renderer.render();
 
     glfwSwapBuffers(window);
     glfwPollEvents();

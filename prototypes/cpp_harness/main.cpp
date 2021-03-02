@@ -59,9 +59,13 @@ public:
 
   uint32_t width, height;
 
+  glm::mat4 viewMatrix;
+  std::vector<float> viewParams;
+
   Renderer(uint32_t w, uint32_t h) 
   : width(w), height(h)
   {
+    viewMatrix = glm::mat4(1.0f);
     init();
   }
 
@@ -138,16 +142,13 @@ public:
       {"iNumPrimitives", glGetUniformLocation(quad_program, "iNumPrimitives")},
       {"iNumMaterials", glGetUniformLocation(quad_program, "iNumMaterials")},
       {"iNumLights", glGetUniformLocation(quad_program, "iNumLights")},
-      {"ubo_primitives", glGetUniformBlockIndex(quad_program, "ubo_0")}
+      {"ubo_0", glGetUniformBlockIndex(quad_program, "ubo_0")}
     };
 
-    glCreateBuffers(1, &primitives_ubo);
-    glBindBuffer(GL_UNIFORM_BUFFER, primitives_ubo);
-    upload_ubo_0(quad_program_uni["ubo_primitives"]);
-
+    upload_ubo_0(quad_program_uni["ubo_0"]);
 
     // Minor thing, but we don't need depth testing for full-screen ray tracing
-    glDisable(GL_DEPTH_TEST);
+    // glDisable(GL_DEPTH_TEST);
 
     initialised = true;
   }
@@ -254,8 +255,6 @@ public:
     p.modelMatrix = glm::scale(p.modelMatrix, {4,4,4});
     primitives.push_back(p);
 
-    
-
     // hugeboi
     p = Sphere();
     p.material() = 1;
@@ -266,8 +265,7 @@ public:
     primitives.push_back(p);
 
     // smolboi
-
-p = Sphere();
+    p = Sphere();
     p.material() = 0;
     p.modelMatrix = glm::translate(p.modelMatrix, {1,2,0});
     p.modelMatrix = glm::scale(p.modelMatrix, {0.5,0.5,0.5});
@@ -290,20 +288,11 @@ p = Sphere();
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(160.0f), glm::vec3{0.0f,0.0f,1.0f});
     primitives.push_back(p);
 
-    // p = new PlaneXZ();
-    // p.set_material(3);
-    // glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [ 50.0, 0.0, 0.0 ]);
-    // glMatrix.mat4.rotateZ(p.modelMatrix, p.modelMatrix, 160.0 * (Math.PI / 180.0));
-    // //p.set_pattern_type(1);
-    // p.pattern = xwall_pattern;
-    // this.primitives.push(p);
-    // p = new PlaneXZ();
-    // p.set_material(3);
-    // glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [ -50.0, 0.0, 0.0 ]);
-    // glMatrix.mat4.rotateZ(p.modelMatrix, p.modelMatrix, -160.0 * (Math.PI / 180.0));
-    // //p.set_pattern_type(1);
-    // p.pattern = xwall_pattern;
-    // this.primitives.push(p);
+    p = PlaneXZ();
+    p.material() = 3;
+    p.modelMatrix = glm::translate(p.modelMatrix, {-50,0,0});
+    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-160.0f), glm::vec3{0.0f,0.0f,1.0f});
+    primitives.push_back(p);
 
     // // z walls
     // p = new PlaneXZ();
@@ -445,10 +434,14 @@ p = Sphere();
       data[offset++] = p.pattern[3];
     }
 
+    glCreateBuffers(1, &primitives_ubo);
+    glBindBuffer(GL_UNIFORM_BUFFER, primitives_ubo);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, primitives_ubo);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(data), data, GL_DYNAMIC_DRAW);
+
+    // std::exit(1);
   }
-glm::mat4 viewMatrix;
-  std::vector<float> viewParams;
+
   void render() {
     if (!initialised)
     {
@@ -464,12 +457,12 @@ glm::mat4 viewMatrix;
     viewParams = {(float)width, (float)height, glm::radians(fov), nearZ};
 
     float eyeRot = 0.01;
-    glm::mat4 rotMat;
+    glm::mat4 rotMat(1.0f);
     rotMat = glm::rotate(rotMat, eyeRot, {0.f,1.f,0.f});
 
     eyePos = rotMat * eyePos;
 
-    viewMatrix = glm::lookAt(glm::vec3(eyePos), glm::vec3{0.0, 0.0, 0.0}, glm::vec3{0.0, 1.0, 0.0});
+    viewMatrix = glm::lookAt(glm::vec3{eyePos.x,eyePos.y,eyePos.z}, glm::vec3{0.0, 0.0, 0.0}, glm::vec3{0.0, 1.0, 0.0});
 
     glViewport(0, 0, width, height);
     // Set clear color to black, fully opaque
@@ -501,7 +494,7 @@ glm::mat4 viewMatrix;
     glUniform1i(quad_program_uni["iNumMaterials"], materials.size());
     glUniform1i(quad_program_uni["iNumLights"], lights.size());
 
-    glUniformMatrix4fv(quad_program_uni["viewMatrix"], 1, false, glm::value_ptr(viewMatrix));
+    glUniformMatrix4fv(quad_program_uni["viewMatrix"], 1, GL_FALSE, glm::value_ptr(viewMatrix));
   }
 };
 
@@ -569,8 +562,8 @@ int main(void)
   glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
   glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);  
 
-  auto w = 200;
-  auto h = 200;
+  auto w = 400;
+  auto h = 400;
   window = glfwCreateWindow(w, h, "Web Tracing CeePlusPlus", NULL, NULL);
   if (!window)
   {
@@ -581,17 +574,13 @@ int main(void)
   glfwMakeContextCurrent(window);
 
   int flags; glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
-if (flags & GL_CONTEXT_FLAG_DEBUG_BIT)
-{
-    // initialize debug output 
-}
-if (flags & GL_CONTEXT_FLAG_DEBUG_BIT)
-{
-    glEnable(GL_DEBUG_OUTPUT);
-    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); 
-    glDebugMessageCallback(glDebugOutput, nullptr);
-    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
-} 
+  if (flags & GL_CONTEXT_FLAG_DEBUG_BIT)
+  {
+      glEnable(GL_DEBUG_OUTPUT);
+      glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); 
+      glDebugMessageCallback(glDebugOutput, nullptr);
+      glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
+  } 
 
 
   glfwSetKeyCallback(window, key_callback);

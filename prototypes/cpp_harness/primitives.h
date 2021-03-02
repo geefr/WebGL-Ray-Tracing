@@ -6,11 +6,14 @@
 
 class Primitive {
   public:
+    Primitive() {
+      modelMatrix = glm::mat4(1.0f);
+    }
     float& type() { return meta[0]; }
     float& material() { return meta[1]; }
     float& pattern_type() { return meta[2]; }
 
-    glm::mat4 modelMatrix = glm::mat4();
+    glm::mat4 modelMatrix;
     glm::vec4 meta;
     glm::vec4 pattern;
 };

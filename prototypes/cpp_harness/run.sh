@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
-g++ main.cpp -lglfw -lGLEW -lGL
+set -e
+g++ main.cpp -g -O0 -lglfw -lGLEW -lGL
 ./a.out
 

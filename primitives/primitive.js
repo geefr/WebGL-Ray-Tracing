@@ -18,7 +18,6 @@ struct Primitive {
 
 class Primitive {
   constructor() {
-    this.type = 0.0;
     this.modelMatrix = glMatrix.mat4.create();
     this.meta = glMatrix.vec4.create();
     this.pattern = glMatrix.vec4.create();
@@ -34,7 +33,7 @@ class Primitive {
 
   // The pattern type to apply to primitive
   set_pattern_type = (i) => { this.meta[2] = i; }
-  get_pattern_type = () => { return this.meta[3]; }
+  get_pattern_type = () => { return this.meta[2]; }
 }
 
 export default Primitive;

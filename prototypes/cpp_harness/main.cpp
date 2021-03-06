@@ -201,7 +201,7 @@ public:
     m.diffuse *= baseColour;
     m.specular *= glm::vec4{0.2, 0.2, 0.2, 1.0};
     m.specular[3] = 1.0;
-    m.reflectivity() = 0.45;
+    m.reflectivity() = 0.8;
     materials.push_back(m);
 
     m = Material();
@@ -214,7 +214,7 @@ public:
     materials.push_back(m);
 
     m = Material();
-    baseColour = {0.9, 0.1, 0.1, 1.0};
+    baseColour = {1.0, 0.1, 0.1, 1.0};
     m.ambient *= baseColour;
     m.diffuse *= baseColour;
     m.specular[3] = 8.0;
@@ -222,7 +222,7 @@ public:
     materials.push_back(m);
 
     m = Material();
-    baseColour = {0.1, 0.1, 0.9, 1.0};
+    baseColour = {0.1, 0.1, 1.0, 1.0};
     m.ambient *= baseColour;
     m.diffuse *= baseColour;
     m.specular[3] = 16.0;
@@ -308,18 +308,24 @@ public:
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-160.0f), glm::vec3{0.0f,0.0f,1.0f});
     primitives.push_back(p);
 
-    // // z walls
+    // z walls
     p = PlaneXZ();
     p.material() = 4;
     p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, 50.0});
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-160.0f), glm::vec3{1.0f, 0.0f, 0.0f});
     primitives.push_back(p);
 
-  p = PlaneXZ();
+    p = PlaneXZ();
     p.material() = 4;
     p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, -50.0});
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(160.0f), glm::vec3{1.0f, 0.0f, 0.0f});
     primitives.push_back(p);
+
+    // A translucent plane, splitting the middle of smolboi and bigboi
+    // p = PlaneXZ();
+    // p.material() = 6;
+    // p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(90.0f), glm::vec3{1.0f, 0.0f, 0.0f});
+    // primitives.push_back(p);
   }
 
   void upload_ubo_0(GLint ubo_index) {

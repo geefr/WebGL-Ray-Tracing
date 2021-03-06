@@ -3,7 +3,7 @@
 precision highp float;
 
 // Performance profiling hacks
-#define PERF_BENCH
+// #define PERF_BENCH
 
 #ifndef PERF_BENCH
 // Enable error indicators
@@ -12,8 +12,8 @@ precision highp float;
 
 // Enable features
 //#define ENABLE_SHADOWS
-//#define ENABLE_REFLECTIONS
-// #define ENABLE_TRANSPARENCY
+#define ENABLE_REFLECTIONS
+//#define ENABLE_TRANSPARENCY
 // TODO: Patterns need some work - Would be extended to texture support or similar
 #define ENABLE_PATTERNS
 
@@ -91,12 +91,12 @@ out vec4 fragColor;
 // Nope! With just phong shading having this at 20 is 5 times worse than having it at 10. At just 6 it's then twice as good as 10 easily.
 // Maybe this is to do with memory usage during the shader? We need a list of intersections somehow don't we?
 const int limit_in_per_ray_max = 6;
-const int limit_reflection_depth = 4;
+const int limit_reflection_depth = 8;
 const int limit_transparency_depth = 10;
 const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
 const float limit_float_max = 1e19;
 const float limit_epsilon = 1e-12;
-const float limit_acne_factor = 1e-3;
+const float limit_acne_factor = 1e-4;
 
 //// Data Types (That aren't uniforms)
 // A ray, starting at origin, travelling along direction
@@ -117,95 +117,6 @@ struct Intersection {
   vec4 ray_reflect; // Direction of reflected ray
   vec2 uv;     // Intersection texture coord on primitive
 };
-
-
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-// A fixed-length segmented array for storing intersections
-// Stores data for intersections along a ray, up to a maximum length (say, 100m or so)
-// Data is always sorted in ascending t
-// If there are 2 intersections close enough to be in the same cell the last intersection written will win
-
-const int IntersectArray_max_divisions = 1024;
-const float IntersectArray_maxT = 100.0;
-const int IntersectArray_max_intersections = 10;
-const float IntersectArray_cellSize = IntersectArray_maxT / float(IntersectArray_max_divisions);
-struct IntersectArray
-{  
-  float t_min;
-  float t_max;
-  int num_stored;
-  int first_i;
-  int last_i;
-  int arr_indices[IntersectArray_max_divisions];
-
-  Intersection arr_intersections[IntersectArray_max_intersections];
-  int arr_intersections_insert;
-};
-IntersectArray IntersectArray_init() {
-  IntersectArray self;
-  self.t_min = IntersectArray_maxT;
-  self.t_max = 0.0;
-  self.num_stored = 0;
-  self.first_i = -1;
-  self.last_i = -1;
-  for( int i = 0; i < IntersectArray_max_divisions; i++ ) {
-    self.arr_indices[i] = -1;
-  }
-  // for( int i = 0; i < IntersectArray_max_intersections; i++ ) {
-  //   self.arr_intersections[i].t = limit_inf;
-  // }
-  self.arr_intersections_insert = 0;
-  return self;
-}
-bool IntersectArray_put( inout IntersectArray self, in Intersection intersection ) {
-  if( intersection.t < 0.0 || intersection.t > IntersectArray_maxT ) return false;
-
-  int i = int( intersection.t / IntersectArray_cellSize );
-
-  int existing_index = self.arr_indices[i];
-  if( existing_index == -1 ) {
-    self.arr_intersections[self.arr_intersections_insert] = intersection;
-    self.arr_indices[i] = self.arr_intersections_insert;
-    self.arr_intersections_insert++;
-    self.num_stored++;
-  }
-  else {
-    self.arr_intersections[existing_index] = intersection;
-  }
-
-  if( intersection.t < self.t_min ) {
-    self.first_i = i;
-    self.t_min = intersection.t;
-  }
-  if( intersection.t > self.t_max ) {
-    self.last_i = i;
-    self.t_max = intersection.t;
-  }
-  return true;
-}
-bool IntersectArray_get( in IntersectArray self, float t, out Intersection intersection ) {
-  if( t < 0.0 || t > IntersectArray_maxT ) return false;
-
-  int i = int( t / IntersectArray_cellSize );
-  if( self.arr_indices[i] == -1 ) return false;
-  intersection = self.arr_intersections[self.arr_indices[i]];
-  return true;
-}
-bool IntersectArray_first( in IntersectArray self, out int i, out Intersection intersection ) {
-  if( self.first_i == -1 ) return false;
-  intersection = self.arr_intersections[self.arr_indices[self.first_i]];
-  i = self.first_i;
-  return true;
-}
-bool IntersectArray_next( in IntersectArray self, inout int i, out Intersection intersection ) {
-  i = max(i, self.first_i);
-  while( i < IntersectArray_max_divisions && self.arr_indices[i] == -1 ) i++;
-  if( i == IntersectArray_max_divisions ) return false;
-  intersection = self.arr_intersections[self.arr_indices[i]];
-  return true;
-}
-/////////////////////////////////////////////////////////////////////////////////////////////////
 
 //// Ray functions
 vec4 ray_to_position(Ray r, float t) { return r.origin + (r.direction * t); }
@@ -357,129 +268,6 @@ vec4 vector_eye( vec4 p, vec4 eye ) { return normalize(eye - p); }
 vec4 vector_light( vec4 p, Light l ) { return normalize(l.position - p); }
 vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n)); }
 
-// Initialise intersections to insane values (t=inf)
-
-// int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections, int min_i, int max_i ) {
-//   int smallest_i = limit_in_per_ray_max + 1;
-//   float smallest_t = limit_inf;
-//   for( int i = min_i; i < max_i; i++ ) {
-//     if( intersections[i].t < smallest_t ) {
-//       smallest_t = intersections[i].t;
-//       smallest_i = i;
-//     }
-//   }
-//   return smallest_i;
-// }
-
-// void sort_intersections( inout Intersection[limit_in_per_ray_max] intersections ) {
-//   for( int out_i = 0; out_i < limit_in_per_ray_max; out_i++ ) {
-//     int closest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
-
-//     // If the closest intersection is at infinity then there's no point continuing
-//     // everything remaining in the array is useless
-//     if( intersections[closest_i].t == limit_inf ) {
-//       for( ; out_i < limit_in_per_ray_max; out_i++ ) {
-//         intersections[out_i].t = limit_inf;
-//       }
-//       return;
-//     }
-//   }
-// }
-
-// // Sorted insert on intersection array, discard any overflow
-// void intersection_insert( inout Intersection[limit_in_per_ray_max] intersections, Intersection new_intersect) {
-//   // Check if it's not out of range already
-//   if( intersections[limit_in_per_ray_max - 1].t < new_intersect.t
-//    || new_intersect.t < 0.0 )
-//   {
-//     return;
-//   }
-
-//   // Find where to insert the new intersection
-//   int i = 0;
-//   while( intersections[i].t < new_intersect.t && i < limit_in_per_ray_max ) i++;
-
-//   // Don't need to shuffle anything - This intersect and any after are nulls
-//   if( intersections[i].t == limit_inf ) {
-//     intersections[i] = new_intersect;
-//     return;
-//   }
-
-//   // There's already an intersection where we want to insert
-//   // Walk down from the end of the array and shuffle any non-nulls to the right
-//   int j = limit_in_per_ray_max - 1;
-//   while( j > i + 1 && intersections[j].t == limit_inf ) j--;
-//   for( ; j > i; j-- ) {
-//     intersections[j] = intersections[j-1];
-//   }
-//   // Made a gap, insert the intersection
-//   intersections[i] = new_intersect;  
-// }
-
-// Perform ray intersection with every primitive
-void ray_intersect_all( Ray r, inout IntersectArray arr ) {
-  //int intersections_insert = 0;
-
-  // Intersect with each primitive
-  for( int i = 0; i < iNumPrimitives; i++ ) {
-    if( is_sphere(i) ) {
-      Intersection sphere_intersections[2];
-      int ints = sphere_intersect(i, r, sphere_intersections);
-
-      for( int j = 0; j < ints; j++ ) {
-        IntersectArray_put(arr, sphere_intersections[j]);
-
-        //intersection_insert(intersections, sphere_intersections[j]);
-
-        //intersections[intersections_insert] = sphere_intersections[j];
-        //intersections_insert++;
-      }
-    }
-    else if( is_plane_xz(i) ) {
-      Intersection plane_intersection;
-      if( plane_xz_intersect(i, r, plane_intersection) ) {
-        IntersectArray_put(arr, plane_intersection);
-        //intersection_insert(intersections, plane_intersection);
-
-        //intersections[intersections_insert] = plane_intersection;
-        //intersections_insert++;
-      }
-    }
-  }
-
-  //sort_intersections(intersections);
-}
-
-// Determine which intersection is the 'hit' - Smallest non-negative t
-// Requires that intersections be sorted before calling
-// if allow_inside == true both inner and outer surfaces will be returned
-bool get_hit_sorted( Intersection[limit_in_per_ray_max] intersections, out Intersection hit, bool allow_inside, bool allow_self, int self_i, out int hit_index ) {
-  for( int i = 0; i < limit_in_per_ray_max; i++ ) {
-    hit = intersections[i];
-
-    if( allow_self == false &&
-        hit.i == self_i ) {
-          continue;
-    }
-
-    if( hit.t == limit_inf ||
-        hit.t < 0.0 ) {
-          // Invalid, or behind the ray's origin
-          continue;
-    }
-
-    if( allow_inside == false &&
-        hit.inside   == true ) {
-          continue;
-    }
-
-    // This is the first valid intersection on the ray
-    hit_index = i;
-    return true;
-  }
-  return false;
-}
-
 // Pre-compute common vectors used during shading, fill in gaps in existing hit
 // Unless this has been called an intersection's data for these will be undefined
 void compute_intersection_data( Ray r, inout Intersection i ) {
@@ -509,14 +297,154 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
   // Note: DO NOT compute shadows in here unless you want infinite recursion in your shader ;)
 }
 
-void IntersectArray_compute_data_all( inout IntersectArray self, Ray r ) {
-  if( self.first_i == -1 || self.last_i == -1 ) return;
-  for( int i = self.first_i; i < self.last_i; i++ ) {
-    if( self.arr_indices[i] != -1 ) {
-      compute_intersection_data(r, self.arr_intersections[self.arr_indices[i]]);
+// Perform ray intersection with every primitive, return the first hit, and whether there was a hit
+bool ray_hit_first( Ray r, inout Intersection intersection ) {
+  intersection.t = limit_inf;
+  bool result = false;
+  // Intersect with each primitive
+  for( int i = 0; i < iNumPrimitives; i++ ) {
+    if( is_sphere(i) ) {
+      Intersection sphere_intersections[2];
+      int ints = sphere_intersect(i, r, sphere_intersections);
+      for( int j = 0; j < ints; j++ ) {
+        Intersection si = sphere_intersections[j];
+        if( si.t < 0.0 ) continue;
+        if( si.t < intersection.t ) {
+          intersection = si;
+          result = true;
+        }
+      }
+    }
+    else if( is_plane_xz(i) ) {
+      Intersection plane_intersection;
+      if( plane_xz_intersect(i, r, plane_intersection) ) {
+        if( plane_intersection.t > 0.0 &&
+            plane_intersection.t < intersection.t ) {
+          intersection = plane_intersection;
+          result = true;
+        }
+      }
     }
   }
+
+  return result;
 }
+
+bool ray_hit_first_outside( Ray r, inout Intersection intersection ) {
+  intersection.t = limit_inf;
+  bool result = false;
+  // Intersect with each primitive
+  for( int i = 0; i < iNumPrimitives; i++ ) {
+    if( is_sphere(i) ) {
+      Intersection sphere_intersections[2];
+      int ints = sphere_intersect(i, r, sphere_intersections);
+      for( int j = 0; j < ints; j++ ) {
+        Intersection si = sphere_intersections[j];
+        compute_intersection_data(r, si);
+        if( si.t < 0.0 ) continue;
+        if( si.inside ) continue;
+        if( si.t < intersection.t ) {
+          intersection = si;
+          result = true;
+        }
+      }
+    }
+    else if( is_plane_xz(i) ) {
+      Intersection plane_intersection;
+      if( plane_xz_intersect(i, r, plane_intersection) ) {
+        compute_intersection_data(r, plane_intersection);
+        if( plane_intersection.inside ) continue;
+        if( plane_intersection.t > 0.0 &&
+            plane_intersection.t < intersection.t ) {
+          intersection = plane_intersection;
+          result = true;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+#ifdef ENABLE_TRANSPARENCY
+bool ray_hit_first_opposite_side_or_other_object( Ray r, inout Intersection intersection, in Intersection current_intersection ) {
+  intersection.t = limit_inf;
+  bool result = false;
+  bool require_side = !current_intersection.inside;
+  // Intersect with each primitive
+  for( int i = 0; i < iNumPrimitives; i++ ) {
+    if( is_sphere(i) ) {
+      Intersection sphere_intersections[2];
+      int ints = sphere_intersect(i, r, sphere_intersections);
+      for( int j = 0; j < ints; j++ ) {
+        Intersection si = sphere_intersections[j];
+        compute_intersection_data(r, si);
+        if( si.t < 0.0 ) continue;
+
+        if( si.i == current_intersection.i ) {
+          if( si.inside != current_intersection.inside ) continue;
+          if( distance(si.pos, current_intersection.pos) < 0.5 ) continue;
+        }
+
+        // if( si.inside != require_side ||
+        //     si.i == current_object) continue;
+
+        if( si.t < intersection.t ) {
+          intersection = si;
+          result = true;
+        }
+      }
+    }
+    else if( is_plane_xz(i) ) {
+      Intersection plane_intersection;
+      if( plane_xz_intersect(i, r, plane_intersection) ) {
+        compute_intersection_data(r, plane_intersection);
+
+        // if( plane_intersection.i == current_object ) continue;
+
+        // if( plane_intersection.inside != require_side ||
+        //     plane_intersection.i == current_object ) continue;
+
+        if( plane_intersection.t > 0.0 &&
+            plane_intersection.t < intersection.t ) {
+          intersection = plane_intersection;
+          result = true;
+        }
+      }
+    }
+  }
+
+  return result;
+}
+#endif
+
+#ifdef ENABLE_SHADOWS
+bool ray_hit_any( Ray r, inout Intersection intersection ) {
+  // Intersect with each primitive
+  for( int i = 0; i < iNumPrimitives; i++ ) {
+    if( is_sphere(i) ) {
+      Intersection sphere_intersections[2];
+      int ints = sphere_intersect(i, r, sphere_intersections);
+      for( int j = 0; j < ints; j++ ) {
+        Intersection si = sphere_intersections[j];
+        if( si.t < 0.0 ) continue;
+        intersection = si;
+        return true;
+      }
+    }
+    else if( is_plane_xz(i) ) {
+      Intersection plane_intersection;
+      if( plane_xz_intersect(i, r, plane_intersection) ) {
+        if( plane_intersection.t > 0.0 ) {
+          intersection = plane_intersection;
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+#endif
 
 // Compute whether a shadow is cast for a given intersection & light
 // Note: previous attempt pre-calculated this for the intersection,
@@ -540,87 +468,59 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
   shadow_ray.origin = intersection.pos + (limit_acne_factor * intersection.normal);
   shadow_ray.direction = vector_light(intersection.pos, l);
 
-  Intersection shadow_intersections[limit_in_per_ray_max];
-  ray_intersect_all(shadow_ray, shadow_intersections);
-  // TODO: PERF: Noticed we don't sort the intersections here at all. would it be faster if we did?
-
-  for( int i = 0; i < limit_in_per_ray_max; i++ ) {
-    Intersection shadow_intersect = shadow_intersections[i];
-    // intersection needs to be populated to determing if it should
-    // cast shadows.
-    // TODO: PERF: Think we just need a subset of this here, so
-    // could save a few cycles
-    compute_intersection_data(shadow_ray, shadow_intersect);
-
-    // Objects behind the surface cannot cast a shadow on the surface
-    if( shadow_intersect.t < 0.0 ) {
-      continue;
+  // TODO: This is broken, probably need to take each intersection in turn and walk along
+  // PERF: But then that means we actually do the intersects lots of times, is that a problem vs an array version?
+  Intersection hit;
+  if( ray_hit_first(shadow_ray, hit) ) {
+    compute_intersection_data(shadow_ray, hit);
+    if( hit.i != intersection.i &&
+        hit.inside == true &&
+        hit.t < l_distance ) {
+      return true;
     }
-
-    // An object cannot cast shadows on itself
-    // (Logically it can, but that's handled by the lighting
-    // calculations, prior to this point)
-    if( shadow_intersect.i == intersection.i ) {
-      continue;
-    }
-
-    // The most definite shadow we can have - The outside
-    // of an object (not self) is blocking the ray
-    // As the ray is surface -> light here we need to check
-    // on inside == true
-    // Check on distance is to ensure object is between
-    // the surface and the light
-    if( shadow_intersect.inside == true &&
-        shadow_intersect.t < l_distance ) {
-          return true;
-    }
-
-    // If not there's 2 approaches here:
-    // 1: Try to apply extra logic to work out if it's a shadow (tricky)
-    // 2: Ensure rays start outside primitives to avoid acne (easy, reduces logic to the one case above)
-    // TODO: Picked 2 in this case. Not perfect but easy and fast.
   }
-#endif
   return false;
-}
 
-// Cast a ray along hit's reflection vector and find the next hit
-// Return true if there's a reflected hit, false otherwise
-// Populate reflected_hit with the new hit's parameters
-bool compute_reflection(Intersection hit, out Intersection reflected_hit) {
-#ifdef ENABLE_REFLECTIONS
-  Ray r;
+  // Intersection shadow_intersections[limit_in_per_ray_max];
+  // ray_intersect_all(shadow_ray, shadow_intersections);
+  // // TODO: PERF: Noticed we don't sort the intersections here at all. would it be faster if we did?
 
-  r.origin = hit.pos + (limit_acne_factor * hit.normal);
-  r.direction = hit.ray_reflect;
+  // for( int i = 0; i < limit_in_per_ray_max; i++ ) {
+  //   Intersection shadow_intersect = shadow_intersections[i];
+  //   // intersection needs to be populated to determing if it should
+  //   // cast shadows.
+  //   // TODO: PERF: Think we just need a subset of this here, so
+  //   // could save a few cycles
+  //   compute_intersection_data(shadow_ray, shadow_intersect);
 
-  Intersection reflect_intersections[limit_in_per_ray_max];
-  ray_intersect_all(r, reflect_intersections);
-  compute_intersection_data_all(r, reflect_intersections );
+  //   // Objects behind the surface cannot cast a shadow on the surface
+  //   if( shadow_intersect.t < 0.0 ) {
+  //     continue;
+  //   }
 
-  int hit_index;
-  return get_hit_sorted(reflect_intersections, reflected_hit, false, false, hit.i, hit_index);
-#endif
-  return false;
-}
+  //   // An object cannot cast shadows on itself
+  //   // (Logically it can, but that's handled by the lighting
+  //   // calculations, prior to this point)
+  //   if( shadow_intersect.i == intersection.i ) {
+  //     continue;
+  //   }
 
-bool compute_transparency(Intersection intersections[limit_in_per_ray_max], int current_hit_i, 
-                          out Intersection transparent_hit, out int transparent_hit_i) {
-  // TODO: Will need rework when refraction is implemented
-#ifdef ENABLE_TRANSPARENCY
-  // Assuming we don't have refraction we just need to move along the intersections
-  for( int i = current_hit_i + 1; i < limit_in_per_ray_max; i++ ) {
-    transparent_hit = intersections[i];
-    if( transparent_hit.t == limit_inf || transparent_hit.t < 0.0 ) {
-      continue;
-    }
+  //   // The most definite shadow we can have - The outside
+  //   // of an object (not self) is blocking the ray
+  //   // As the ray is surface -> light here we need to check
+  //   // on inside == true
+  //   // Check on distance is to ensure object is between
+  //   // the surface and the light
+  //   if( shadow_intersect.inside == true &&
+  //       shadow_intersect.t < l_distance ) {
+  //         return true;
+  //   }
 
-    // This is the next intersection on the ray
-    // Either it's leaving the transparent object we're inside,
-    // Or hit a new object (which may or may not be transparent)
-    transparent_hit_i = i;
-    return true;
-  }
+  //   // If not there's 2 approaches here:
+  //   // 1: Try to apply extra logic to work out if it's a shadow (tricky)
+  //   // 2: Ensure rays start outside primitives to avoid acne (easy, reduces logic to the one case above)
+  //   // TODO: Picked 2 in this case. Not perfect but easy and fast.
+  // }
 #endif
   return false;
 }
@@ -727,21 +627,100 @@ void main() {
   Ray r = ray_for_pixel();
 
   // All of the intersections on this ray
-  IntersectArray arr = IntersectArray_init();
-  ray_intersect_all( r, arr );
-  IntersectArray_compute_data_all(arr, r);
-
-  // Work out the hit
-  // Choosing not to render inner surfaces here
-  // This solves some render noise in tangent cases.
   Intersection hit;
-  int hit_index = -1;
-  if( !IntersectArray_first(arr, hit_index, hit) ) {
+  if( !ray_hit_first( r, hit ) ) {
 #ifdef DEBUG
     fragColor = vec4(1.0, 0.0, 1.0, 1.0);
 #endif
-    return;    
+    return;
   }
+  compute_intersection_data( r, hit );
+  // Shade the main hit
+  vec4 shade = shade_phong( hit, true );
+
+#ifdef ENABLE_TRANSPARENCY
+  // Handle transparency in a similar way to reflections - Continue along the ray
+  // and shade based on each surface's transparency constant
+
+  // TODO: For now refraction doesn't exist. When it's added this will need extensive rework
+  {
+    Material current_m = primitive_material(hit.i);
+    Intersection current_hit = hit;
+    Ray current_ray = r;
+    Intersection transparent_hit = hit;
+    int transparency_depth = 0;
+    while(current_m.phys.y != 0.0) {
+      // Continue the ray from just the other side of the surface
+      Ray transparent_ray;
+      transparent_ray.origin = current_hit.pos + (limit_acne_factor * (- hit.normal));
+      transparent_ray.direction = current_ray.direction; // TODO: Refraction
+      if( !ray_hit_first_opposite_side_or_other_object(transparent_ray, transparent_hit, current_hit) ) {
+        // We failed to hit anything
+        break;
+      }
+      compute_intersection_data(transparent_ray, transparent_hit);
+
+      // Shade the next hit on the ray, shadows disabled
+      // Mix based on transparency of the current surface
+      vec4 transparent_shade = shade_phong( transparent_hit, false );
+      shade = mix(shade, transparent_shade, current_m.phys.y);
+
+      current_hit = transparent_hit;
+      current_ray = transparent_ray;
+      current_m = primitive_material(current_hit.i);
+
+      transparency_depth++;
+      
+      if( transparency_depth == limit_transparency_depth ) {
+        // We can't go any further.
+        break;
+      }
+    }
+  }
+#endif
+  
+
+#ifdef ENABLE_REFLECTIONS
+  // Reflect until we hit a non-reflective surface, or hit the reflection limit
+  {
+    Material current_m = primitive_material(hit.i);
+    Intersection current_hit = hit;
+    Ray current_ray = r;
+    Intersection reflected_hit = hit;
+    int reflection_depth = 0;
+    while(current_m.phys.x != 0.0) {
+      Ray reflected_ray;
+      reflected_ray.origin = current_hit.pos + (limit_acne_factor * current_hit.normal);
+      reflected_ray.direction = current_hit.ray_reflect;
+
+      if( !ray_hit_first_outside(reflected_ray, reflected_hit) ) {
+        // We failed to hit anything
+        // - Ray heads off into the ether
+        // - Or some other failure state, probably a few here
+        break;
+      }
+
+      // Shade the reflection - But with shadows disabled, this is slow enough already
+      // Mix based on the reflectivity of the current surface
+      vec4 reflected_shade = shade_phong( reflected_hit, false );
+      shade = mix(shade, reflected_shade, current_m.phys.x);
+
+      current_hit = reflected_hit;
+      current_ray = reflected_ray;
+      current_m = primitive_material(current_hit.i);
+
+      reflection_depth++;
+      
+      if( reflection_depth == limit_reflection_depth ) {
+        // We can't go any further.
+        // We could fade out here or do something fancy, the attempted options all look bad.
+        // TODO: Fog would be a nice way to hide this. Maybe fog over the summed ray distance?
+        // Either way we're done processing.
+        break;
+      }
+    }
+  }
+#endif
 
 #ifdef PERF_BENCH
 /*
@@ -770,82 +749,6 @@ void main() {
     }
   }*/
 #endif // PERF_BENCH
-
-  // Shade the main hit
-  vec4 shade = shade_phong( hit, true );
-
-#ifdef ENABLE_REFLECTIONS
-  // Reflect until we hit a non-reflective surface, or hit the reflection limit
-  {
-    Material current_m = primitive_material(hit.i);
-    Intersection current_hit = hit;
-    Intersection reflected_hit = hit;
-    int reflection_depth = 0;
-    while(current_m.phys.x != 0.0) {
-      if( !compute_reflection(current_hit, reflected_hit) ) {
-        // We failed to hit anything
-        // - Ray heads off into the ether
-        // - Or some other failure state, probably a few here
-        break;
-      }
-
-      // Shade the reflection - But with shadows disabled, this is slow enough already
-      // Mix based on the reflectivity of the current surface
-      vec4 reflected_shade = shade_phong( reflected_hit, false );
-      shade = mix(shade, reflected_shade, current_m.phys.x);
-
-      current_hit = reflected_hit;
-      current_m = primitive_material(current_hit.i);
-
-      reflection_depth++;
-      
-      if( reflection_depth == limit_reflection_depth ) {
-        // We can't go any further.
-        // We could fade out here or do something fancy, the attempted options all look bad.
-        // TODO: Fog would be a nice way to hide this. Maybe fog over the summed ray distance?
-        // Either way we're done processing.
-        break;
-      }
-    }
-  }
-#endif
-
-#ifdef ENABLE_TRANSPARENCY
-  // Handle transparency in a similar way to reflections - Continue along the ray
-  // and shade based on each surface's transparency constant
-
-  // TODO: For now refraction doesn't exist. WHen it's added this will need extensive rework
-  {
-    Material current_m = primitive_material(hit.i);
-    Intersection current_hit = hit;
-    Intersection transparent_hit = hit;
-    int transparency_depth = 0;
-    int current_hit_i = hit_index;
-    int transparent_hit_i = hit_index;
-    while(current_m.phys.y != 0.0) {
-      if( !compute_transparency(intersections, current_hit_i, transparent_hit, transparent_hit_i) ) {
-        // We failed to hit anything
-        break;
-      }
-
-      // Shade the next hit on the ray, shadows disabled
-      // Mix based on transparency of the current surface
-      vec4 transparent_shade = shade_phong( transparent_hit, false );
-      shade = mix(shade, transparent_shade, current_m.phys.y);
-
-      current_hit = transparent_hit;
-      current_hit_i = transparent_hit_i; // TODO: Naming - 'i' is confusing here
-      current_m = primitive_material(current_hit.i);
-
-      transparency_depth++;
-      
-      if( transparency_depth == limit_transparency_depth ) {
-        // We can't go any further.
-        break;
-      }
-    }
-  }
-#endif
 
   fragColor = shade;
 }

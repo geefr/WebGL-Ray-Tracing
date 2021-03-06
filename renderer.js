@@ -112,7 +112,7 @@ class Renderer {
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
 
-    this.eyePos = [16.0, 10.0, 0.0, 1.0];
+    this.eyePos = [0.0, 10.0, 20.0, 1.0];
 
     this.initialised = true;
   }
@@ -250,14 +250,14 @@ class Renderer {
 
     // x walls
     p = new PlaneXZ();
-    p.set_material(3);
+    p.set_material(4);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [50.0, 0.0, 0.0]);
     glMatrix.mat4.rotateZ(p.modelMatrix, p.modelMatrix, 160.0 * (Math.PI / 180.0));
     //p.set_pattern_type(1);
     p.pattern = xwall_pattern;
     this.primitives.push(p);
     p = new PlaneXZ();
-    p.set_material(3);
+    p.set_material(4);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [-50.0, 0.0, 0.0]);
     glMatrix.mat4.rotateZ(p.modelMatrix, p.modelMatrix, -160.0 * (Math.PI / 180.0));
     //p.set_pattern_type(1);
@@ -266,14 +266,14 @@ class Renderer {
 
     // z walls
     p = new PlaneXZ();
-    p.set_material(3);
+    p.set_material(4);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, 50.0]);
     glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, -160.0 * (Math.PI / 180.0));
     //p.set_pattern_type(1);
     p.pattern = zwall_pattern;
     this.primitives.push(p);
     p = new PlaneXZ();
-    p.set_material(3);
+    p.set_material(4);
     glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [0.0, 0.0, -50.0]);
     glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, 160.0 * (Math.PI / 180.0));
     //p.set_pattern_type(1);

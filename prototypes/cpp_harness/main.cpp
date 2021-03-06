@@ -51,7 +51,7 @@ public:
   GLuint quad_vbo_uv = 0;
   std::map<std::string, GLint> quad_program_uni;
   GLuint primitives_ubo = 0;
-  glm::vec4 eyePos = {16.0, 10.0, 0.0, 1.0};
+  glm::vec4 eyePos = {4.0, 10.0, 16.0, 1.0};
 
   std::vector<Material> materials;
   std::vector<PointLight> lights;
@@ -309,20 +309,17 @@ public:
     primitives.push_back(p);
 
     // // z walls
-    // p = new PlaneXZ();
-    // p.set_material(3);
-    // glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [ 0.0, 0.0, 50.0 ]);
-    // glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, -160.0 * (Math.PI / 180.0));
-    // //p.set_pattern_type(1);
-    // p.pattern = zwall_pattern;
-    // this.primitives.push(p);
-    // p = new PlaneXZ();
-    // p.set_material(3);
-    // glMatrix.mat4.translate(p.modelMatrix, p.modelMatrix, [ 0.0, 0.0, -50.0 ]);
-    // glMatrix.mat4.rotateX(p.modelMatrix, p.modelMatrix, 160.0 * (Math.PI / 180.0));
-    // //p.set_pattern_type(1);
-    // p.pattern = zwall_pattern;
-    // this.primitives.push(p);
+    p = PlaneXZ();
+    p.material() = 4;
+    p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, 50.0});
+    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-160.0f), glm::vec3{1.0f, 0.0f, 0.0f});
+    primitives.push_back(p);
+
+  p = PlaneXZ();
+    p.material() = 4;
+    p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, -50.0});
+    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(160.0f), glm::vec3{1.0f, 0.0f, 0.0f});
+    primitives.push_back(p);
   }
 
   void upload_ubo_0(GLint ubo_index) {
@@ -470,7 +467,7 @@ public:
     
     viewParams = {(float)width, (float)height, glm::radians(fov), nearZ};
 
-    float eyeRot = 0.01;
+    float eyeRot = 0.005;
     glm::mat4 rotMat(1.0f);
     rotMat = glm::rotate(rotMat, eyeRot, {0.f,1.f,0.f});
 
@@ -576,8 +573,8 @@ int main(void)
   glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
   glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);  
 
-  auto w = 400;
-  auto h = 400;
+  auto w = 800;
+  auto h = 800;
   window = glfwCreateWindow(w, h, "Web Tracing CeePlusPlus", NULL, NULL);
   if (!window)
   {

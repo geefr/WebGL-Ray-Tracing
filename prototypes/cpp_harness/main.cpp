@@ -220,7 +220,7 @@ public:
     auto l = PointLight();
     l.position = { 0.0, 30.0, 0.0, 1.0 };
     l.intensity = {0.3, 0.3, 0.3, 1.0 };
-    l.cast_shadows = false;
+    l.cast_shadows = true;
     lights.push_back(l);
 
     l = PointLight();
@@ -283,13 +283,13 @@ public:
 
     // x walls
     p = PlaneXZ();
-    p.material() = 3;
+    p.material() = 4;
     p.modelMatrix = glm::translate(p.modelMatrix, {50,0,0});
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(160.0f), glm::vec3{0.0f,0.0f,1.0f});
     primitives.push_back(p);
 
     p = PlaneXZ();
-    p.material() = 3;
+    p.material() = 4;
     p.modelMatrix = glm::translate(p.modelMatrix, {-50,0,0});
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-160.0f), glm::vec3{0.0f,0.0f,1.0f});
     primitives.push_back(p);
@@ -584,7 +584,7 @@ int main(void)
 
 
   glfwSetKeyCallback(window, key_callback);
-  glfwSwapInterval(1);
+  // glfwSwapInterval(1);
 
   Renderer renderer(w, h);
 

@@ -2,16 +2,23 @@
 
 precision highp float;
 
+// Performance profiling hacks
+#define PERF_BENCH
+
+#ifndef PERF_BENCH
 // Enable error indicators
 // - Diagonal red stripes: Intersections aren't sorted / depth ordering problem
 // #define DEBUG
 
 // Enable features
-#define ENABLE_SHADOWS
-#define ENABLE_REFLECTIONS
-#define ENABLE_TRANSPARENCY
+//#define ENABLE_SHADOWS
+//#define ENABLE_REFLECTIONS
+// #define ENABLE_TRANSPARENCY
 // TODO: Patterns need some work - Would be extended to texture support or similar
 #define ENABLE_PATTERNS
+
+#endif // PERF_BENCH
+
 
 #define PI 3.1415926538
 
@@ -80,13 +87,16 @@ out vec4 fragColor;
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //// Limits and constants
 // The maximum number of intersections for a single ray (Because glsl can't have dynamic arrays)
-const int limit_in_per_ray_max = 10;
+// TODO: PERF: Limiting this makes a huge difference on performance, but is that just because we don't so as many reflections?
+// Nope! With just phong shading having this at 20 is 5 times worse than having it at 10. At just 6 it's then twice as good as 10 easily.
+// Maybe this is to do with memory usage during the shader? We need a list of intersections somehow don't we?
+const int limit_in_per_ray_max = 6;
 const int limit_reflection_depth = 4;
-const int limit_transparency_depth = 4;
+const int limit_transparency_depth = 10;
 const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
 const float limit_float_max = 1e19;
 const float limit_epsilon = 1e-12;
-const float limit_acne_factor = 100.0 * limit_epsilon;
+const float limit_acne_factor = 1e-3;
 
 //// Data Types (That aren't uniforms)
 // A ray, starting at origin, travelling along direction
@@ -259,17 +269,12 @@ vec4 vector_light( vec4 p, Light l ) { return normalize(l.position - p); }
 vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n)); }
 
 // Initialise intersections to insane values (t=inf)
-void init_intersection( out Intersection intersection ) { 
-  intersection.i = 0;
-  intersection.t = limit_inf;
-}
-void init_intersections( out Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {init_intersection(intersections[i]);}}
 
 int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections, int min_i, int max_i ) {
-  int smallest_i = max_i + 1;
+  int smallest_i = limit_in_per_ray_max + 1;
   float smallest_t = limit_inf;
   for( int i = min_i; i < max_i; i++ ) {
-    if( intersections[i].t <= smallest_t ) {
+    if( intersections[i].t < smallest_t ) {
       smallest_t = intersections[i].t;
       smallest_i = i;
     }
@@ -277,33 +282,57 @@ int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections
   return smallest_i;
 }
 
-// A simple sort, nothing fancy, probably not fast
-// PERF: This is around 50% cost of trace + shadows + phong. Needs addressing
 void sort_intersections( inout Intersection[limit_in_per_ray_max] intersections ) {
-  Intersection result[limit_in_per_ray_max];
-  for( int out_i = 0; out_i < limit_in_per_ray_max - 1; out_i++ ) {
+  for( int out_i = 0; out_i < limit_in_per_ray_max; out_i++ ) {
     int closest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
 
     // If the closest intersection is at infinity then there's no point continuing
     // everything remaining in the array is useless
     if( intersections[closest_i].t == limit_inf ) {
       for( ; out_i < limit_in_per_ray_max; out_i++ ) {
-        init_intersection(intersections[out_i]);
+        intersections[out_i].t = limit_inf;
       }
       return;
     }
-
-    // Swap smallest with current element
-    Intersection tmp = intersections[out_i];
-    intersections[out_i] = intersections[closest_i];
-    intersections[closest_i] = tmp;
   }
+}
+
+// Sorted insert on intersection array, discard any overflow
+void intersection_insert( inout Intersection[limit_in_per_ray_max] intersections, Intersection new_intersect) {
+  // Check if it's not out of range already
+  if( intersections[limit_in_per_ray_max - 1].t < new_intersect.t
+   || new_intersect.t < 0.0 )
+  {
+    return;
+  }
+
+  // Find where to insert the new intersection
+  int i = 0;
+  while( intersections[i].t < new_intersect.t && i < limit_in_per_ray_max ) i++;
+
+  // Don't need to shuffle anything - This intersect and any after are nulls
+  if( intersections[i].t == limit_inf ) {
+    intersections[i] = new_intersect;
+    return;
+  }
+
+  // There's already an intersection where we want to insert
+  // Walk down from the end of the array and shuffle any non-nulls to the right
+  int j = limit_in_per_ray_max - 1;
+  while( j > i + 1 && intersections[j].t == limit_inf ) j--;
+  for( ; j > i; j-- ) {
+    intersections[j] = intersections[j-1];
+  }
+  // Made a gap, insert the intersection
+  intersections[i] = new_intersect;  
 }
 
 // Perform ray intersection with every primitive
 void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) {
   int intersections_insert = 0;
-  
+
+  for( int i = 0; i < limit_in_per_ray_max; i++) { intersections[i].t = limit_inf; }
+
   // Intersect with each primitive
   for( int i = 0; i < iNumPrimitives; i++ ) {
     if( is_sphere(i) ) {
@@ -311,18 +340,24 @@ void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersec
       int ints = sphere_intersect(i, r, sphere_intersections);
 
       for( int j = 0; j < ints; j++ ) {
-        intersections[intersections_insert] = sphere_intersections[j];
-        intersections_insert++;
+        intersection_insert(intersections, sphere_intersections[j]);
+
+        //intersections[intersections_insert] = sphere_intersections[j];
+        //intersections_insert++;
       }
     }
     else if( is_plane_xz(i) ) {
       Intersection plane_intersection;
       if( plane_xz_intersect(i, r, plane_intersection) ) {
-        intersections[intersections_insert] = plane_intersection;
-        intersections_insert++;
+        intersection_insert(intersections, plane_intersection);
+
+        //intersections[intersections_insert] = plane_intersection;
+        //intersections_insert++;
       }
     }
   }
+
+  sort_intersections(intersections);
 }
 
 // Determine which intersection is the 'hit' - Smallest non-negative t
@@ -410,7 +445,6 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
   shadow_ray.direction = vector_light(intersection.pos, l);
 
   Intersection shadow_intersections[limit_in_per_ray_max];
-  init_intersections(shadow_intersections);
   ray_intersect_all(shadow_ray, shadow_intersections);
   // TODO: PERF: Noticed we don't sort the intersections here at all. would it be faster if we did?
 
@@ -465,9 +499,7 @@ bool compute_reflection(Intersection hit, out Intersection reflected_hit) {
   r.direction = hit.ray_reflect;
 
   Intersection reflect_intersections[limit_in_per_ray_max];
-  init_intersections(reflect_intersections);
   ray_intersect_all(r, reflect_intersections);
-  sort_intersections(reflect_intersections);
   compute_intersection_data_all(r, reflect_intersections );
 
   int hit_index;
@@ -595,15 +627,12 @@ Ray ray_for_pixel() {
 }
 
 void main() {
+
   Ray r = ray_for_pixel();
 
   // All of the intersections on this ray
   Intersection intersections[limit_in_per_ray_max];
-  init_intersections( intersections );
-
   ray_intersect_all( r, intersections );
-
-  sort_intersections( intersections );
 
 #ifdef DEBUG
   float t = - limit_float_max;
@@ -623,13 +652,41 @@ void main() {
   // Choosing not to render inner surfaces here
   // This solves some render noise in tangent cases.
   Intersection hit;
-  init_intersection(hit);
   // allow_self true as we don't have a 'self' yet (It's a hack, avoid the check in get_hit)
   int hit_index = -1;
   if( !get_hit_sorted(intersections, hit, false, true, 0, hit_index) ) {
+#ifdef DEBUG
     fragColor = vec4(1.0, 0.0, 1.0, 1.0);
+#endif
     return;
   }
+
+#ifdef PERF_BENCH
+  // Intersection origIntersections[limit_in_per_ray_max] = intersections;
+  for( int hack = 0; hack < 32; hack++ ) {
+    ray_intersect_all( r, intersections );
+  //   compute_intersection_data_all(r, intersections );
+
+  //   // allow_self true as we don't have a 'self' yet (It's a hack, avoid the check in get_hit)
+  //   hit_index = -1;
+  //   if( !get_hit_sorted(intersections, hit, false, true, 0, hit_index) ) {
+  // #ifdef DEBUG
+  //     fragColor = vec4(1.0, 0.0, 1.0, 1.0);
+  // #endif
+  //     return;
+  //   }
+  }
+
+  float t = - limit_float_max;
+  for( int i = 0; i < limit_in_per_ray_max - 1; i++ ) {
+    Intersection current = intersections[i];
+    Intersection next = intersections[i + 1];
+    if( next.t < current.t ) {
+      fragColor = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), sin(400.0 * distance(vUV, vec2(0.0, 0.0))));
+      return;
+    }
+  }
+#endif // PERF_BENCH
 
   // Shade the main hit
   vec4 shade = shade_phong( hit, true );

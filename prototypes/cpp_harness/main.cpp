@@ -100,7 +100,21 @@ public:
     glAttachShader(quad_program, fs);
     glLinkProgram(quad_program);
     glGetProgramiv(quad_program, GL_LINK_STATUS, &result);
-    if( result != GL_TRUE ) throw std::runtime_error("Failed to link shader");
+    if( result != GL_TRUE ) {
+      //Note: maxLength includes the NUL terminator.
+      GLint maxLength = 0;
+      glGetProgramiv(quad_program, GL_INFO_LOG_LENGTH, &maxLength);        
+
+      //C++11 does not permit you to overwrite the NUL terminator,
+      //even if you are overwriting it with the NUL terminator.
+      //C++17 does, so you could subtract 1 from the length and skip the `pop_back`.
+      std::basic_string<GLchar> infoLog(maxLength, '\0');
+      glGetProgramInfoLog(quad_program, maxLength, &maxLength, &infoLog[0]);
+      infoLog.pop_back();
+
+      //Use the infoLog in whatever manner you deem best.
+      throw std::runtime_error("Failed to link shader: " + infoLog);
+    }
     glUseProgram(quad_program);
 
     glCreateVertexArrays(1, &quad_vao);

@@ -118,6 +118,95 @@ struct Intersection {
   vec2 uv;     // Intersection texture coord on primitive
 };
 
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+// A fixed-length segmented array for storing intersections
+// Stores data for intersections along a ray, up to a maximum length (say, 100m or so)
+// Data is always sorted in ascending t
+// If there are 2 intersections close enough to be in the same cell the last intersection written will win
+
+const int IntersectArray_max_divisions = 1024;
+const float IntersectArray_maxT = 100.0;
+const int IntersectArray_max_intersections = 10;
+const float IntersectArray_cellSize = IntersectArray_maxT / float(IntersectArray_max_divisions);
+struct IntersectArray
+{  
+  float t_min;
+  float t_max;
+  int num_stored;
+  int first_i;
+  int last_i;
+  int arr_indices[IntersectArray_max_divisions];
+
+  Intersection arr_intersections[IntersectArray_max_intersections];
+  int arr_intersections_insert;
+};
+IntersectArray IntersectArray_init() {
+  IntersectArray self;
+  self.t_min = IntersectArray_maxT;
+  self.t_max = 0.0;
+  self.num_stored = 0;
+  self.first_i = -1;
+  self.last_i = -1;
+  for( int i = 0; i < IntersectArray_max_divisions; i++ ) {
+    self.arr_indices[i] = -1;
+  }
+  // for( int i = 0; i < IntersectArray_max_intersections; i++ ) {
+  //   self.arr_intersections[i].t = limit_inf;
+  // }
+  self.arr_intersections_insert = 0;
+  return self;
+}
+bool IntersectArray_put( inout IntersectArray self, in Intersection intersection ) {
+  if( intersection.t < 0.0 || intersection.t > IntersectArray_maxT ) return false;
+
+  int i = int( intersection.t / IntersectArray_cellSize );
+
+  int existing_index = self.arr_indices[i];
+  if( existing_index == -1 ) {
+    self.arr_intersections[self.arr_intersections_insert] = intersection;
+    self.arr_indices[i] = self.arr_intersections_insert;
+    self.arr_intersections_insert++;
+    self.num_stored++;
+  }
+  else {
+    self.arr_intersections[existing_index] = intersection;
+  }
+
+  if( intersection.t < self.t_min ) {
+    self.first_i = i;
+    self.t_min = intersection.t;
+  }
+  if( intersection.t > self.t_max ) {
+    self.last_i = i;
+    self.t_max = intersection.t;
+  }
+  return true;
+}
+bool IntersectArray_get( in IntersectArray self, float t, out Intersection intersection ) {
+  if( t < 0.0 || t > IntersectArray_maxT ) return false;
+
+  int i = int( t / IntersectArray_cellSize );
+  if( self.arr_indices[i] == -1 ) return false;
+  intersection = self.arr_intersections[self.arr_indices[i]];
+  return true;
+}
+bool IntersectArray_first( in IntersectArray self, out int i, out Intersection intersection ) {
+  if( self.first_i == -1 ) return false;
+  intersection = self.arr_intersections[self.arr_indices[self.first_i]];
+  i = self.first_i;
+  return true;
+}
+bool IntersectArray_next( in IntersectArray self, inout int i, out Intersection intersection ) {
+  i = max(i, self.first_i);
+  while( i < IntersectArray_max_divisions && self.arr_indices[i] == -1 ) i++;
+  if( i == IntersectArray_max_divisions ) return false;
+  intersection = self.arr_intersections[self.arr_indices[i]];
+  return true;
+}
+/////////////////////////////////////////////////////////////////////////////////////////////////
+
 //// Ray functions
 vec4 ray_to_position(Ray r, float t) { return r.origin + (r.direction * t); }
 
@@ -270,68 +359,66 @@ vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n))
 
 // Initialise intersections to insane values (t=inf)
 
-int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections, int min_i, int max_i ) {
-  int smallest_i = limit_in_per_ray_max + 1;
-  float smallest_t = limit_inf;
-  for( int i = min_i; i < max_i; i++ ) {
-    if( intersections[i].t < smallest_t ) {
-      smallest_t = intersections[i].t;
-      smallest_i = i;
-    }
-  }
-  return smallest_i;
-}
+// int closest_intersection( inout Intersection[limit_in_per_ray_max] intersections, int min_i, int max_i ) {
+//   int smallest_i = limit_in_per_ray_max + 1;
+//   float smallest_t = limit_inf;
+//   for( int i = min_i; i < max_i; i++ ) {
+//     if( intersections[i].t < smallest_t ) {
+//       smallest_t = intersections[i].t;
+//       smallest_i = i;
+//     }
+//   }
+//   return smallest_i;
+// }
 
-void sort_intersections( inout Intersection[limit_in_per_ray_max] intersections ) {
-  for( int out_i = 0; out_i < limit_in_per_ray_max; out_i++ ) {
-    int closest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
+// void sort_intersections( inout Intersection[limit_in_per_ray_max] intersections ) {
+//   for( int out_i = 0; out_i < limit_in_per_ray_max; out_i++ ) {
+//     int closest_i = closest_intersection(intersections, out_i, limit_in_per_ray_max);
 
-    // If the closest intersection is at infinity then there's no point continuing
-    // everything remaining in the array is useless
-    if( intersections[closest_i].t == limit_inf ) {
-      for( ; out_i < limit_in_per_ray_max; out_i++ ) {
-        intersections[out_i].t = limit_inf;
-      }
-      return;
-    }
-  }
-}
+//     // If the closest intersection is at infinity then there's no point continuing
+//     // everything remaining in the array is useless
+//     if( intersections[closest_i].t == limit_inf ) {
+//       for( ; out_i < limit_in_per_ray_max; out_i++ ) {
+//         intersections[out_i].t = limit_inf;
+//       }
+//       return;
+//     }
+//   }
+// }
 
-// Sorted insert on intersection array, discard any overflow
-void intersection_insert( inout Intersection[limit_in_per_ray_max] intersections, Intersection new_intersect) {
-  // Check if it's not out of range already
-  if( intersections[limit_in_per_ray_max - 1].t < new_intersect.t
-   || new_intersect.t < 0.0 )
-  {
-    return;
-  }
+// // Sorted insert on intersection array, discard any overflow
+// void intersection_insert( inout Intersection[limit_in_per_ray_max] intersections, Intersection new_intersect) {
+//   // Check if it's not out of range already
+//   if( intersections[limit_in_per_ray_max - 1].t < new_intersect.t
+//    || new_intersect.t < 0.0 )
+//   {
+//     return;
+//   }
 
-  // Find where to insert the new intersection
-  int i = 0;
-  while( intersections[i].t < new_intersect.t && i < limit_in_per_ray_max ) i++;
+//   // Find where to insert the new intersection
+//   int i = 0;
+//   while( intersections[i].t < new_intersect.t && i < limit_in_per_ray_max ) i++;
 
-  // Don't need to shuffle anything - This intersect and any after are nulls
-  if( intersections[i].t == limit_inf ) {
-    intersections[i] = new_intersect;
-    return;
-  }
+//   // Don't need to shuffle anything - This intersect and any after are nulls
+//   if( intersections[i].t == limit_inf ) {
+//     intersections[i] = new_intersect;
+//     return;
+//   }
 
-  // There's already an intersection where we want to insert
-  // Walk down from the end of the array and shuffle any non-nulls to the right
-  int j = limit_in_per_ray_max - 1;
-  while( j > i + 1 && intersections[j].t == limit_inf ) j--;
-  for( ; j > i; j-- ) {
-    intersections[j] = intersections[j-1];
-  }
-  // Made a gap, insert the intersection
-  intersections[i] = new_intersect;  
-}
+//   // There's already an intersection where we want to insert
+//   // Walk down from the end of the array and shuffle any non-nulls to the right
+//   int j = limit_in_per_ray_max - 1;
+//   while( j > i + 1 && intersections[j].t == limit_inf ) j--;
+//   for( ; j > i; j-- ) {
+//     intersections[j] = intersections[j-1];
+//   }
+//   // Made a gap, insert the intersection
+//   intersections[i] = new_intersect;  
+// }
 
 // Perform ray intersection with every primitive
-void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) {
-  int intersections_insert = 0;
-
-  for( int i = 0; i < limit_in_per_ray_max; i++) { intersections[i].t = limit_inf; }
+void ray_intersect_all( Ray r, inout IntersectArray arr ) {
+  //int intersections_insert = 0;
 
   // Intersect with each primitive
   for( int i = 0; i < iNumPrimitives; i++ ) {
@@ -340,7 +427,9 @@ void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersec
       int ints = sphere_intersect(i, r, sphere_intersections);
 
       for( int j = 0; j < ints; j++ ) {
-        intersection_insert(intersections, sphere_intersections[j]);
+        IntersectArray_put(arr, sphere_intersections[j]);
+
+        //intersection_insert(intersections, sphere_intersections[j]);
 
         //intersections[intersections_insert] = sphere_intersections[j];
         //intersections_insert++;
@@ -349,7 +438,8 @@ void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersec
     else if( is_plane_xz(i) ) {
       Intersection plane_intersection;
       if( plane_xz_intersect(i, r, plane_intersection) ) {
-        intersection_insert(intersections, plane_intersection);
+        IntersectArray_put(arr, plane_intersection);
+        //intersection_insert(intersections, plane_intersection);
 
         //intersections[intersections_insert] = plane_intersection;
         //intersections_insert++;
@@ -357,7 +447,7 @@ void ray_intersect_all( Ray r, inout Intersection[limit_in_per_ray_max] intersec
     }
   }
 
-  sort_intersections(intersections);
+  //sort_intersections(intersections);
 }
 
 // Determine which intersection is the 'hit' - Smallest non-negative t
@@ -419,8 +509,14 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
   // Note: DO NOT compute shadows in here unless you want infinite recursion in your shader ;)
 }
 
-void compute_intersection_data_first( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { compute_intersection_data(r, intersections[0]); }
-void compute_intersection_data_all( Ray r, inout Intersection[limit_in_per_ray_max] intersections ) { for( int i = 0; i < limit_in_per_ray_max; i++ ) {compute_intersection_data(r, intersections[i]);}}
+void IntersectArray_compute_data_all( inout IntersectArray self, Ray r ) {
+  if( self.first_i == -1 || self.last_i == -1 ) return;
+  for( int i = self.first_i; i < self.last_i; i++ ) {
+    if( self.arr_indices[i] != -1 ) {
+      compute_intersection_data(r, self.arr_intersections[self.arr_indices[i]]);
+    }
+  }
+}
 
 // Compute whether a shadow is cast for a given intersection & light
 // Note: previous attempt pre-calculated this for the intersection,
@@ -631,37 +727,24 @@ void main() {
   Ray r = ray_for_pixel();
 
   // All of the intersections on this ray
-  Intersection intersections[limit_in_per_ray_max];
-  ray_intersect_all( r, intersections );
-
-#ifdef DEBUG
-  float t = - limit_float_max;
-  for( int i = 0; i < limit_in_per_ray_max - 1; i++ ) {
-    Intersection current = intersections[i];
-    Intersection next = intersections[i + 1];
-    if( next.t < current.t ) {
-      fragColor = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), sin(400.0 * distance(vUV, vec2(0.0, 0.0))));
-      return;
-    }
-  }
-#endif
-
-  compute_intersection_data_all(r, intersections );
+  IntersectArray arr = IntersectArray_init();
+  ray_intersect_all( r, arr );
+  IntersectArray_compute_data_all(arr, r);
 
   // Work out the hit
   // Choosing not to render inner surfaces here
   // This solves some render noise in tangent cases.
   Intersection hit;
-  // allow_self true as we don't have a 'self' yet (It's a hack, avoid the check in get_hit)
   int hit_index = -1;
-  if( !get_hit_sorted(intersections, hit, false, true, 0, hit_index) ) {
+  if( !IntersectArray_first(arr, hit_index, hit) ) {
 #ifdef DEBUG
     fragColor = vec4(1.0, 0.0, 1.0, 1.0);
 #endif
-    return;
+    return;    
   }
 
 #ifdef PERF_BENCH
+/*
   // Intersection origIntersections[limit_in_per_ray_max] = intersections;
   for( int hack = 0; hack < 32; hack++ ) {
     ray_intersect_all( r, intersections );
@@ -685,7 +768,7 @@ void main() {
       fragColor = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), sin(400.0 * distance(vUV, vec2(0.0, 0.0))));
       return;
     }
-  }
+  }*/
 #endif // PERF_BENCH
 
   // Shade the main hit

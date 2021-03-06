@@ -106,8 +106,8 @@ class Renderer {
     };
 
     this.primitives_ubo = gl.createBuffer();
-    gl.bindBuffer(gl.UNIFORM_BUFFER, this.primitives_ubo);
-    this.upload_ubo_0(this.quad_program_uni.ubo_primitives)
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.primitives_ubo);
+    this.upload_ubo_0(this.quad_program_uni.ubo_primitives);
 
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);

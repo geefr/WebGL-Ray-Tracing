@@ -584,6 +584,7 @@ int main(void)
 
 
   glfwSetKeyCallback(window, key_callback);
+  glfwSwapInterval(1);
 
   Renderer renderer(w, h);
 
@@ -592,6 +593,7 @@ int main(void)
     renderer.render();
 
     glfwSwapBuffers(window);
+
     glfwPollEvents();
     //glfwWaitEvents();
   }

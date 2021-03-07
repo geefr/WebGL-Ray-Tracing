@@ -90,8 +90,7 @@ out vec4 fragColor;
 // TODO: PERF: Limiting this makes a huge difference on performance, but is that just because we don't so as many reflections?
 // Nope! With just phong shading having this at 20 is 5 times worse than having it at 10. At just 6 it's then twice as good as 10 easily.
 // Maybe this is to do with memory usage during the shader? We need a list of intersections somehow don't we?
-const int limit_reflection_depth = 8;
-const int limit_transparency_depth = 10;
+const int limit_reflection_and_transparency_depth = 8;
 const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
 const float limit_epsilon = 1e-12;
 const float limit_acne_factor = 1e-4; // To force intersections to one side of a surface or the other
@@ -402,7 +401,6 @@ bool ray_hit_first_transparency( Ray r, inout Intersection intersection, in Inte
         compute_intersection_data(r, plane_intersection);
 
         // Probably less of an issue for planes
-        // TODO: Test transparent planes properly
         if( plane_intersection.i == current_intersection.i ) {
           if( plane_intersection.inside != require_side ) continue;
           if( distance(plane_intersection.pos, current_intersection.pos) < limit_min_surface_thickness ) continue;
@@ -465,8 +463,8 @@ bool ray_hit_first_shadow( Ray r, inout Intersection intersection, in Intersecti
 // Turns out that's a problem causes https://stackoverflow.com/questions/60984733/warning-x3550-array-reference-cannot-be-used-as-an-l-value
 //
 // PERF: Shadows are expensive
-bool compute_shadow_cast( Intersection intersection, Light l ) {
 #ifdef ENABLE_SHADOWS
+bool compute_shadow_cast( Intersection intersection, Light l ) {
   if( l.shadow.x == 0.0 ) {
     // This light doesn't cast shadows, skip
     return false;
@@ -483,9 +481,8 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
 
   Intersection hit;
   return ray_hit_first_shadow( shadow_ray, hit, intersection, l_distance );
-#endif
-  return false;
 }
+#endif
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Shading functions
@@ -604,98 +601,66 @@ void main() {
   // Shade the main hit
   vec4 shade = shade_phong( hit, true );
 
-#ifdef ENABLE_TRANSPARENCY
-  // Handle transparency in a similar way to reflections - Continue along the ray
-  // and shade based on each surface's transparency constant
-
-  // TODO: For now refraction doesn't exist. When it's added this will need extensive rework
-  {
-    // State variables for the loop
-    Material current_m = primitive_material(hit.i);
-    Intersection current_hit = hit;
-    Ray current_ray = r;
-    Intersection transparent_hit = hit;
-    // The contribution for the current surface. Compound of each transparency factor as we go
-    float shade_factor = 1.0;
-    // Limit on transparency depth - Hopefully by the time this is hit shade_factor will be tiny
-    int transparency_depth = 0;
-    while(current_m.phys.y != 0.0) {
-      // Continue the ray from just the other side of the surface
-      Ray transparent_ray;
-      transparent_ray.origin = current_hit.pos + (limit_acne_factor * (- hit.normal));
-      transparent_ray.direction = current_ray.direction; // TODO: Refraction
-      if( !ray_hit_first_transparency(transparent_ray, transparent_hit, current_hit) ) {
-        // We failed to hit anything
-        break;
-      }
-      compute_intersection_data(transparent_ray, transparent_hit);
-
-      // Shade the next hit on the ray, shadows disabled
-      // Mix based on transparency of the current surface
-      shade_factor *= current_m.phys.y;
-      vec4 transparent_shade = shade_phong( transparent_hit, false );
-      shade = mix(shade, transparent_shade, shade_factor);
-
-      current_hit = transparent_hit;
-      current_ray = transparent_ray;
-      current_m = primitive_material(current_hit.i);
-
-      transparency_depth++;
-      
-      if( transparency_depth == limit_transparency_depth ) {
-        // We can't go any further.
-        break;
-      }
-    }
-  }
-#endif
   
-
-#ifdef ENABLE_REFLECTIONS
-  // Reflect until we hit a non-reflective surface, or hit the reflection limit
   {
     Material current_m = primitive_material(hit.i);
     Intersection current_hit = hit;
     Ray current_ray = r;
-    Intersection reflected_hit = hit;
+    Intersection next_hit = hit;
     // The contribution for the current surface. Compound of each reflectivity factor as we go
     float shade_factor = 1.0;
-    // Limit on reflection depth - Hopefully by the time this is hit shade_factor will be tiny
-    int reflection_depth = 0;
-    while(current_m.phys.x != 0.0) {
-      Ray reflected_ray;
-      reflected_ray.origin = current_hit.pos + (limit_acne_factor * current_hit.normal);
-      reflected_ray.direction = current_hit.ray_reflect;
-
-      if( !ray_hit_first_reflection(reflected_ray, reflected_hit) ) {
-        // We failed to hit anything
-        // - Ray heads off into the ether
-        // - Or some other failure state, probably a few here
+    // Limit on depth - Hopefully by the time this is hit shade_factor will be tiny
+    int depth = 0;
+    while(depth != limit_reflection_and_transparency_depth) {
+      // If the surface isn't reflective or translucent
+      // then stop. Nowhere else to go from here.
+      if( current_m.phys.x == 0.0 &&
+          current_m.phys.y == 0.0 ) {
         break;
       }
 
-      // Shade the reflection - But with shadows disabled, this is slow enough already
-      // Mix based on the reflectivity of the current surface
-      shade_factor *= current_m.phys.x;
-      vec4 reflected_shade = shade_phong( reflected_hit, false );
-      shade = mix(shade, reflected_shade, shade_factor);
+      // Reflection
+      if( current_m.phys.x != 0.0 ) {
+        current_ray.origin = current_hit.pos + (limit_acne_factor * current_hit.normal);
+        current_ray.direction = current_hit.ray_reflect;
+        if( !ray_hit_first_reflection(current_ray, current_hit) ) {
+          // We failed to hit anything
+          // - Ray heads off into the ether
+          // - Or some other failure state, probably a few here
+          break;
+        }
+        compute_intersection_data(current_ray, current_hit);
 
-      current_hit = reflected_hit;
-      current_ray = reflected_ray;
+        // Shade the reflection - But with shadows disabled, this is slow enough already
+        // Mix based on the reflectivity of the current surface
+        shade_factor *= current_m.phys.x;
+        vec4 reflected_shade = shade_phong( current_hit, false );
+        shade = mix(shade, reflected_shade, shade_factor);
+      }
+      // TODO: For now it's one or the other, never both to avoid O(n^lots) recursion
+      // Transparency / Refraction
+      else if( current_m.phys.y != 0.0 ) {
+        // Continue the ray from just the other side of the surface
+        current_ray.origin = current_hit.pos + (limit_acne_factor * (- hit.normal));
+        current_ray.direction = current_ray.direction; // TODO: Refraction
+        if( !ray_hit_first_transparency(current_ray, current_hit, current_hit) ) {
+          // We failed to hit anything
+          break;
+        }
+        compute_intersection_data(current_ray, current_hit);
+
+        // Shade the next hit on the ray, shadows disabled
+        // Mix based on transparency of the current surface
+        shade_factor *= current_m.phys.y;
+        vec4 transparent_shade = shade_phong( current_hit, false );
+        shade = mix(shade, transparent_shade, shade_factor);
+      }
       current_m = primitive_material(current_hit.i);
-
-      reflection_depth++;
-      
-      if( reflection_depth == limit_reflection_depth ) {
-        // We can't go any further.
-        // We could fade out here or do something fancy, the attempted options all look bad.
-        // TODO: Fog would be a nice way to hide this. Maybe fog over the summed ray distance?
-        // Either way we're done processing.
-        break;
-      }
+      depth++;
     }
   }
-#endif
+
+
 
 #ifdef PERF_BENCH
 /*

@@ -219,6 +219,7 @@ public:
     m.diffuse *= baseColour;
     m.specular[3] = 8.0;
     m.transparency() = 0.3;
+    m.reflectivity() = 0.3;
     materials.push_back(m);
 
     m = Material();
@@ -265,8 +266,8 @@ public:
 
     p = Sphere();
     p.material() = 7;
-    p.modelMatrix = glm::translate(p.modelMatrix, {0, 2, -5});
-    p.modelMatrix = glm::scale(p.modelMatrix, {4,4,4});
+    p.modelMatrix = glm::translate(p.modelMatrix, {0, 2, -10});
+    p.modelMatrix = glm::scale(p.modelMatrix, {16, 4, 16});
     primitives.push_back(p);
 
     // hugeboi

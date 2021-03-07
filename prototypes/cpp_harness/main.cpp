@@ -51,7 +51,7 @@ public:
   GLuint quad_vbo_uv = 0;
   std::map<std::string, GLint> quad_program_uni;
   GLuint primitives_ubo = 0;
-  glm::vec4 eyePos = {4.0, 10.0, 16.0, 1.0};
+  glm::vec4 eyePos = {4.0, 10.0, 20.0, 1.0};
 
   std::vector<Material> materials;
   std::vector<PointLight> lights;
@@ -232,18 +232,18 @@ public:
 /////////////
     
     auto l = PointLight();
-    l.position = { 0.0, 30.0, 0.0, 1.0 };
+    l.position = { 0.0, 20.0, 0.0, 1.0 };
     l.intensity = {0.3, 0.3, 0.3, 1.0 };
     l.cast_shadows = true;
     lights.push_back(l);
 
     l = PointLight();
-    l.position = {-30.0, 25.0, -45.0, 1.0 };
+    l.position = {-30.0, 20.0, 30.0, 1.0 };
     l.cast_shadows = true;
     lights.push_back(l);
  
     l = PointLight();
-    l.position = {30.0, 10.0, 0.0, 1.0 };
+    l.position = {20.0, 10.0, 0.0, 1.0 };
     l.cast_shadows = true;
     lights.push_back(l);
 
@@ -298,27 +298,27 @@ public:
     // x walls
     p = PlaneXZ();
     p.material() = 4;
-    p.modelMatrix = glm::translate(p.modelMatrix, {50,0,0});
-    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(160.0f), glm::vec3{0.0f,0.0f,1.0f});
+    p.modelMatrix = glm::translate(p.modelMatrix, {60,0,0});
+    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(130.0f), glm::vec3{0.0f,0.0f,1.0f});
     primitives.push_back(p);
 
     p = PlaneXZ();
     p.material() = 4;
-    p.modelMatrix = glm::translate(p.modelMatrix, {-50,0,0});
-    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-160.0f), glm::vec3{0.0f,0.0f,1.0f});
+    p.modelMatrix = glm::translate(p.modelMatrix, {-60,0,0});
+    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-130.0f), glm::vec3{0.0f,0.0f,1.0f});
     primitives.push_back(p);
 
     // z walls
     p = PlaneXZ();
     p.material() = 4;
-    p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, 50.0});
-    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-160.0f), glm::vec3{1.0f, 0.0f, 0.0f});
+    p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, 60.0});
+    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-130.0f), glm::vec3{1.0f, 0.0f, 0.0f});
     primitives.push_back(p);
 
     p = PlaneXZ();
     p.material() = 4;
-    p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, -50.0});
-    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(160.0f), glm::vec3{1.0f, 0.0f, 0.0f});
+    p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, -60.0});
+    p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(130.0f), glm::vec3{1.0f, 0.0f, 0.0f});
     primitives.push_back(p);
 
     // A translucent plane, splitting the middle of smolboi and bigboi

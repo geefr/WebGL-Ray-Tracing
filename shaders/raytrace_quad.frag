@@ -11,9 +11,9 @@ precision highp float;
 // #define DEBUG
 
 // Enable features
-//#define ENABLE_SHADOWS
-#define ENABLE_REFLECTIONS
-#define ENABLE_TRANSPARENCY
+#define ENABLE_SHADOWS
+// #define ENABLE_REFLECTIONS
+// #define ENABLE_TRANSPARENCY
 // TODO: Patterns need some work - Would be extended to texture support or similar
 #define ENABLE_PATTERNS
 
@@ -422,15 +422,23 @@ bool ray_hit_first_transparency( Ray r, inout Intersection intersection, in Inte
 #endif
 
 #ifdef ENABLE_SHADOWS
-bool ray_hit_any( Ray r, inout Intersection intersection ) {
-  // Intersect with each primitive
+bool ray_hit_first_shadow( Ray r, inout Intersection intersection, in Intersection current_intersection, in float light_distance ) {
+  /*
+   Intersection check for shadow cast
+   - return true if there's at least one hit between current_intersection and the light (t < light_distance)
+   - And that hit is not the current object - Nothing can cast on itself (TODO: For now - With complex shapes that's not true)
+  */
   for( int i = 0; i < iNumPrimitives; i++ ) {
     if( is_sphere(i) ) {
       Intersection sphere_intersections[2];
       int ints = sphere_intersect(i, r, sphere_intersections);
       for( int j = 0; j < ints; j++ ) {
         Intersection si = sphere_intersections[j];
+
+        if( si.i == current_intersection.i ) continue;
         if( si.t < 0.0 ) continue;
+        if( si.t > light_distance ) continue;
+
         intersection = si;
         return true;
       }
@@ -438,10 +446,12 @@ bool ray_hit_any( Ray r, inout Intersection intersection ) {
     else if( is_plane_xz(i) ) {
       Intersection plane_intersection;
       if( plane_xz_intersect(i, r, plane_intersection) ) {
-        if( plane_intersection.t > 0.0 ) {
-          intersection = plane_intersection;
-          return true;
-        }
+        if( plane_intersection.i == current_intersection.i ) continue;
+        if( plane_intersection.t < 0.0 ) continue;
+        if( plane_intersection.t > light_distance ) continue;
+
+        intersection = plane_intersection;
+        return true;
       }
     }
   }
@@ -471,59 +481,8 @@ bool compute_shadow_cast( Intersection intersection, Light l ) {
   shadow_ray.origin = intersection.pos + (limit_acne_factor * intersection.normal);
   shadow_ray.direction = vector_light(intersection.pos, l);
 
-  // TODO: This is broken, probably need to take each intersection in turn and walk along
-  // PERF: But then that means we actually do the intersects lots of times, is that a problem vs an array version?
   Intersection hit;
-  if( ray_hit_first(shadow_ray, hit) ) {
-    compute_intersection_data(shadow_ray, hit);
-    if( hit.i != intersection.i &&
-        hit.inside == true &&
-        hit.t < l_distance ) {
-      return true;
-    }
-  }
-  return false;
-
-  // Intersection shadow_intersections[limit_in_per_ray_max];
-  // ray_intersect_all(shadow_ray, shadow_intersections);
-  // // TODO: PERF: Noticed we don't sort the intersections here at all. would it be faster if we did?
-
-  // for( int i = 0; i < limit_in_per_ray_max; i++ ) {
-  //   Intersection shadow_intersect = shadow_intersections[i];
-  //   // intersection needs to be populated to determing if it should
-  //   // cast shadows.
-  //   // TODO: PERF: Think we just need a subset of this here, so
-  //   // could save a few cycles
-  //   compute_intersection_data(shadow_ray, shadow_intersect);
-
-  //   // Objects behind the surface cannot cast a shadow on the surface
-  //   if( shadow_intersect.t < 0.0 ) {
-  //     continue;
-  //   }
-
-  //   // An object cannot cast shadows on itself
-  //   // (Logically it can, but that's handled by the lighting
-  //   // calculations, prior to this point)
-  //   if( shadow_intersect.i == intersection.i ) {
-  //     continue;
-  //   }
-
-  //   // The most definite shadow we can have - The outside
-  //   // of an object (not self) is blocking the ray
-  //   // As the ray is surface -> light here we need to check
-  //   // on inside == true
-  //   // Check on distance is to ensure object is between
-  //   // the surface and the light
-  //   if( shadow_intersect.inside == true &&
-  //       shadow_intersect.t < l_distance ) {
-  //         return true;
-  //   }
-
-  //   // If not there's 2 approaches here:
-  //   // 1: Try to apply extra logic to work out if it's a shadow (tricky)
-  //   // 2: Ensure rays start outside primitives to avoid acne (easy, reduces logic to the one case above)
-  //   // TODO: Picked 2 in this case. Not perfect but easy and fast.
-  // }
+  return ray_hit_first_shadow( shadow_ray, hit, intersection, l_distance );
 #endif
   return false;
 }
@@ -565,6 +524,8 @@ vec4 shade_phong( Intersection hit, bool enable_shadows ) {
       // Check if the light is blocked (in shadow)
       // If so diffuse and specular are zero
       if( enable_shadows && compute_shadow_cast( hit, light ) ) {
+        // shade = vec4(1.0, 0.0, 0.0, 1.0);
+        // return shade;
         continue;
       }
       

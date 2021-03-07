@@ -2,10 +2,6 @@
 
 precision highp float;
 
-// Performance profiling hacks
-// #define PERF_BENCH
-
-#ifndef PERF_BENCH
 // Enable error indicators
 // - Diagonal red stripes: Intersections aren't sorted / depth ordering problem
 // #define DEBUG
@@ -16,8 +12,6 @@ precision highp float;
 #define ENABLE_TRANSPARENCY
 // TODO: Patterns need some work - Would be extended to texture support or similar
 #define ENABLE_PATTERNS
-
-#endif // PERF_BENCH
 
 
 #define PI 3.1415926538
@@ -86,50 +80,59 @@ out vec4 fragColor;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //// Limits and constants
-// The maximum number of intersections for a single ray (Because glsl can't have dynamic arrays)
-// TODO: PERF: Limiting this makes a huge difference on performance, but is that just because we don't so as many reflections?
-// Nope! With just phong shading having this at 20 is 5 times worse than having it at 10. At just 6 it's then twice as good as 10 easily.
-// Maybe this is to do with memory usage during the shader? We need a list of intersections somehow don't we?
-const int limit_reflection_and_transparency_depth = 8;
-const float limit_inf = 1e20; // Could use 1.0 / 0.0, but nvidia optimises using uintBitsToFloat, which requires version 330
-const float limit_epsilon = 1e-12;
-const float limit_acne_factor = 1e-4; // To force intersections to one side of a surface or the other
-const float limit_min_surface_thickness = 1e-3; // A hack for transparency, to avoid tunneling transparent rays around sphere edges (TODO: Refraction)
+// PERF: How many reflections/refractions to perform for the ray.
+// Less than ~6 will be visually noticeable (Objects not being transparent when viewed through a mirror)
+const int limit_reflection_and_transparency_depth = 8; 
 
-//// Data Types (That aren't uniforms)
+// Could use 1.0 / 0.0, but nvidia optimises that using uintBitsToFloat, which requires version 330
+const float limit_inf = 1e20;
+// Smol value for float comparisons
+const float limit_epsilon = 1e-12;
+
+// Small offsets used to ensure intersections are the correct side of surfaces
+// If too small noise/acne will be visible
+const float limit_acne_factor = 1e-4;
+const float limit_min_surface_thickness = 1e-3;
+
+// PERF: If you've got a really nice gpu or want to melt your PC enable this
+// While it doesn't look as good shadows should really be off after the first
+// intersection, especially if multiple lights have shadows enabled.
+const bool limit_subray_shadows_enabled = false;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//// Data Types
 // A ray, starting at origin, travelling along direction
 struct Ray {
   vec4 origin;
   vec4 direction;
 };
 
-// An intersection between a ray and primitive(i) at (t)
-// (The closest of a set of intersections is referred to as the 'hit')
+// An intersection between a ray and primitives[i] at (t)
 struct Intersection {
-  float t;     // Intersection distance (along current ray)
-  int i;       // primitive index
-  bool inside; // true if intersection is within an object (Ray going from inside -> outside)
-  vec4 pos;    // Intersection position
-  vec4 eye;    // Intersection -> eye vector
-  vec4 normal; // Intersection normal
+  float t;                // Intersection distance along the ray
+  int i;                 // primitive index
+  bool inside;          // true if intersection is within an object (Ray going from inside -> outside)
+  vec4 pos;            // Intersection position
+  vec4 eye;           // Intersection -> eye vector
+  vec4 normal;       // Intersection normal
   vec4 ray_reflect; // Direction of reflected ray
-  vec2 uv;     // Intersection texture coord on primitive
+  vec2 uv;         // Intersection texture coord on primitive
 };
 
 //// Ray functions
 vec4 ray_to_position(Ray r, float t) { return r.origin + (r.direction * t); }
-
-Ray ray_tf_world_to_model(Ray r, mat4 modelMatrix) { 
-  // Transform a ray from world space to model space (inverse of modelMatrix)
-  // Note that direction is left unnormalised - So that direction * t functions correctly
+// Transform a ray from world space to model space (inverse of modelMatrix)
+// Note that direction is left unnormalised - So that direction * t functions correctly
+Ray ray_tf_world_to_model(Ray r, mat4 modelMatrix) {   
   mat4 m = inverse(modelMatrix);
   Ray rt;
   rt.origin = m * r.origin;
   rt.direction = m * r.direction;
   return rt;
 }
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
-// Primitive Functions - Utility methods for primitive, plus intersections
+// Primitive Utility Functions
 Material primitive_material(int i) { return materials[int(primitives[i].meta.y)]; }
 
 #ifdef ENABLE_PATTERNS
@@ -260,8 +263,7 @@ vec4 plane_xz_normal(int i) {
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-//// Utility functions
-// Common vector calculations
+// Calculation of intersection vectors
 vec4 vector_eye( vec4 p, vec4 eye ) { return normalize(eye - p); }
 vec4 vector_light( vec4 p, Light l ) { return normalize(l.position - p); }
 vec4 vector_light_reflected( vec4 i, vec4 n ) { return normalize(reflect(-i, n)); }
@@ -295,7 +297,11 @@ void compute_intersection_data( Ray r, inout Intersection i ) {
   // Note: DO NOT compute shadows in here unless you want infinite recursion in your shader ;)
 }
 
-// Perform ray intersection with every primitive, return the first hit, and whether there was a hit
+/////////////////////////////////////////////////////////////////////////////////////////////////
+// Ray intersection functions
+// TODO: For now there's multiple, could be largely unified into one function
+
+// Perform ray intersecti
 bool ray_hit_first( Ray r, inout Intersection intersection ) {
   intersection.t = limit_inf;
   bool result = false;
@@ -458,10 +464,6 @@ bool ray_hit_first_shadow( Ray r, inout Intersection intersection, in Intersecti
 #endif
 
 // Compute whether a shadow is cast for a given intersection & light
-// Note: previous attempt pre-calculated this for the intersection,
-// but required assignment to element in array (intersection.shadow_casters[i])
-// Turns out that's a problem causes https://stackoverflow.com/questions/60984733/warning-x3550-array-reference-cannot-be-used-as-an-l-value
-//
 // PERF: Shadows are expensive
 #ifdef ENABLE_SHADOWS
 bool compute_shadow_cast( Intersection intersection, Light l ) {
@@ -507,42 +509,36 @@ vec4 shade_phong( Intersection hit, bool enable_shadows ) {
 #endif
 
     // Angle between light and surface normal
-    // To better support transparency both outer and inner surfaces are lit
-    float i_n = (dot(i, hit.normal));
-    /*if( i_n < 0.0 ) {
-      // Light is behind the surface
-      // diffuse & specular == 0
-      // Shadow calculation disabled
-    } else*/ {
-      // Light is somewhere in front of the surface
-      // diffuse and specular based on light angle to surface
-      // shadows may be casted by objects between surface and light
-      //
-      // Check if the light is blocked (in shadow)
-      // If so diffuse and specular are zero
-      if( enable_shadows && compute_shadow_cast( hit, light ) ) {
-        // shade = vec4(1.0, 0.0, 0.0, 1.0);
-        // return shade;
-        continue;
-      }
-      
-      // Diffuse component
+    // To better support transparency both outer
+    // and inner surfaces have diffuse colour
+    float i_n = dot(i, hit.normal);
+    
+    // Light is somewhere in front of the surface
+    // diffuse and specular based on light angle to surface
+    // shadows may be casted by objects between surface and light
+    //
+    // Check if the light is blocked (in shadow)
+    // If so diffuse and specular are zero
+    if( enable_shadows && compute_shadow_cast( hit, light ) ) {
+      continue;
+    }
+    
+    // Diffuse component
 #ifdef ENABLE_PATTERNS
-      shade += (primitive_pattern(hit.i, m.diffuse, hit.uv) * light.intensity * abs(i_n));
+    shade += (primitive_pattern(hit.i, m.diffuse, hit.uv) * light.intensity * abs(i_n));
 #else
-      shade += m.diffuse * light.intensity * abs(i_n);
+    shade += m.diffuse * light.intensity * abs(i_n);
 #endif
 
-      // Specular component
-      // Not included for inner surfaces as that looks weird
-      float s_e = (dot(s, hit.eye));
-      if( s_e >= 0.0 )
-      {
-        float f = pow(s_e, m.specular.w);
-        shade += (m.specular * light.intensity * f);
-      }
+    // Specular component
+    // Not included for inner surfaces as that looks weird
+    float s_e = (dot(s, hit.eye));
+    if( s_e >= 0.0 )
+    {
+      float f = pow(s_e, m.specular.w);
+      shade += (m.specular * light.intensity * f);
     }
-   }
+  }
 
   shade = shade / float(iNumLights);
   shade.a = 1.0;
@@ -589,7 +585,8 @@ void main() {
 
   Ray r = ray_for_pixel();
 
-  // All of the intersections on this ray
+  // Perform the first ray intersection
+  // and shade the first hit
   Intersection hit;
   if( !ray_hit_first( r, hit ) ) {
 #ifdef DEBUG
@@ -598,97 +595,67 @@ void main() {
     return;
   }
   compute_intersection_data( r, hit );
-  // Shade the main hit
   vec4 shade = shade_phong( hit, true );
 
-  
-  {
-    Material current_m = primitive_material(hit.i);
-    Intersection current_hit = hit;
-    Ray current_ray = r;
-    Intersection next_hit = hit;
-    // The contribution for the current surface. Compound of each reflectivity factor as we go
-    float shade_factor = 1.0;
-    // Limit on depth - Hopefully by the time this is hit shade_factor will be tiny
-    int depth = 0;
-    while(depth != limit_reflection_and_transparency_depth) {
-      // If the surface isn't reflective or translucent
-      // then stop. Nowhere else to go from here.
-      if( current_m.phys.x == 0.0 &&
-          current_m.phys.y == 0.0 ) {
+  // And if the surface we hit has special properties spawn additional rays from here
+  // Here properties such as reflectivity and transparency are mutually exclusive.
+  // This is to keep the performance sensible, and avoid hacks to perform
+  // recursion in glsl.
+  Material current_m = primitive_material(hit.i);
+  Intersection current_hit = hit;
+  Ray current_ray = r;
+
+  // The contribution for the current surface. Compound of each reflectivity factor as we go
+  float shade_factor = 1.0;
+  // Limit on depth - Hopefully by the time this is hit shade_factor will be tiny
+  int depth = 0;
+  while(depth != limit_reflection_and_transparency_depth) {
+    // If the surface isn't reflective or translucent
+    // then stop. Nowhere else to go from here.
+    if( current_m.phys.x == 0.0 &&
+        current_m.phys.y == 0.0 ) {
+      break;
+    }
+
+    // Reflection
+    if( current_m.phys.x != 0.0 ) {
+      current_ray.origin = current_hit.pos + (limit_acne_factor * current_hit.normal);
+      current_ray.direction = current_hit.ray_reflect;
+      if( !ray_hit_first_reflection(current_ray, current_hit) ) {
+        // We failed to hit anything
+        // - Ray heads off into the ether
+        // - Or some other failure state, probably a few here
         break;
       }
+      compute_intersection_data(current_ray, current_hit);
 
-      // Reflection
-      if( current_m.phys.x != 0.0 ) {
-        current_ray.origin = current_hit.pos + (limit_acne_factor * current_hit.normal);
-        current_ray.direction = current_hit.ray_reflect;
-        if( !ray_hit_first_reflection(current_ray, current_hit) ) {
-          // We failed to hit anything
-          // - Ray heads off into the ether
-          // - Or some other failure state, probably a few here
-          break;
-        }
-        compute_intersection_data(current_ray, current_hit);
-
-        // Shade the reflection - But with shadows disabled, this is slow enough already
-        // Mix based on the reflectivity of the current surface
-        shade_factor *= current_m.phys.x;
-        vec4 reflected_shade = shade_phong( current_hit, false );
-        shade = mix(shade, reflected_shade, shade_factor);
-      }
-      // TODO: For now it's one or the other, never both to avoid O(n^lots) recursion
-      // Transparency / Refraction
-      else if( current_m.phys.y != 0.0 ) {
-        // Continue the ray from just the other side of the surface
-        current_ray.origin = current_hit.pos + (limit_acne_factor * (- hit.normal));
-        current_ray.direction = current_ray.direction; // TODO: Refraction
-        if( !ray_hit_first_transparency(current_ray, current_hit, current_hit) ) {
-          // We failed to hit anything
-          break;
-        }
-        compute_intersection_data(current_ray, current_hit);
-
-        // Shade the next hit on the ray, shadows disabled
-        // Mix based on transparency of the current surface
-        shade_factor *= current_m.phys.y;
-        vec4 transparent_shade = shade_phong( current_hit, false );
-        shade = mix(shade, transparent_shade, shade_factor);
-      }
-      current_m = primitive_material(current_hit.i);
-      depth++;
+      // Shade the reflection - But with shadows disabled, this is slow enough already
+      // Mix based on the reflectivity of the current surface
+      shade_factor *= current_m.phys.x;
+      vec4 reflected_shade = shade_phong( current_hit, limit_subray_shadows_enabled );
+      shade = mix(shade, reflected_shade, shade_factor);
     }
-  }
+    
+    // Transparency / Refraction
+    else if( current_m.phys.y != 0.0 ) {
+      // Continue the ray from just the other side of the surface
+      current_ray.origin = current_hit.pos + (limit_acne_factor * (- hit.normal));
+      current_ray.direction = current_ray.direction; // TODO: Refraction
+      if( !ray_hit_first_transparency(current_ray, current_hit, current_hit) ) {
+        // We failed to hit anything
+        break;
+      }
+      compute_intersection_data(current_ray, current_hit);
 
-
-
-#ifdef PERF_BENCH
-/*
-  // Intersection origIntersections[limit_in_per_ray_max] = intersections;
-  for( int hack = 0; hack < 32; hack++ ) {
-    ray_intersect_all( r, intersections );
-  //   compute_intersection_data_all(r, intersections );
-
-  //   // allow_self true as we don't have a 'self' yet (It's a hack, avoid the check in get_hit)
-  //   hit_index = -1;
-  //   if( !get_hit_sorted(intersections, hit, false, true, 0, hit_index) ) {
-  // #ifdef DEBUG
-  //     fragColor = vec4(1.0, 0.0, 1.0, 1.0);
-  // #endif
-  //     return;
-  //   }
-  }
-
-  float t = - limit_float_max;
-  for( int i = 0; i < limit_in_per_ray_max - 1; i++ ) {
-    Intersection current = intersections[i];
-    Intersection next = intersections[i + 1];
-    if( next.t < current.t ) {
-      fragColor = mix(vec4(1.0, 0.0, 0.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), sin(400.0 * distance(vUV, vec2(0.0, 0.0))));
-      return;
+      // Shade the next hit on the ray, shadows disabled
+      // Mix based on transparency of the current surface
+      shade_factor *= current_m.phys.y;
+      vec4 transparent_shade = shade_phong( current_hit, limit_subray_shadows_enabled );
+      shade = mix(shade, transparent_shade, shade_factor);
     }
-  }*/
-#endif // PERF_BENCH
+    current_m = primitive_material(current_hit.i);
+    depth++;
+  }
 
   fragColor = shade;
 }

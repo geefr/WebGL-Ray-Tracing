@@ -201,7 +201,7 @@ public:
     m.diffuse *= baseColour;
     m.specular *= glm::vec4{0.2, 0.2, 0.2, 1.0};
     m.specular[3] = 1.0;
-    m.reflectivity() = 0.3;
+    m.reflectivity() = 0.5;
     materials.push_back(m);
 
     m = Material();
@@ -218,7 +218,6 @@ public:
     m.ambient *= baseColour;
     m.diffuse *= baseColour;
     m.specular[3] = 8.0;
-    m.transparency() = 0.3;
     m.reflectivity() = 0.3;
     materials.push_back(m);
 
@@ -233,19 +232,19 @@ public:
 /////////////
     
     auto l = PointLight();
-    l.position = { 0.0, 20.0, 0.0, 1.0 };
+    l.position = { 0.0, 20.0, 20.0, 1.0 };
     l.intensity = {0.3, 0.3, 0.3, 1.0 };
     l.cast_shadows = true;
     lights.push_back(l);
 
     l = PointLight();
     l.position = {-30.0, 20.0, 30.0, 1.0 };
-    l.cast_shadows = true;
+    l.cast_shadows = false;
     lights.push_back(l);
  
     l = PointLight();
     l.position = {20.0, 10.0, 0.0, 1.0 };
-    l.cast_shadows = true;
+    l.cast_shadows = false;
     lights.push_back(l);
 
 /////////////

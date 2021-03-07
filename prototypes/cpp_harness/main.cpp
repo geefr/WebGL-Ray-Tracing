@@ -51,7 +51,7 @@ public:
   GLuint quad_vbo_uv = 0;
   std::map<std::string, GLint> quad_program_uni;
   GLuint primitives_ubo = 0;
-  glm::vec4 eyePos = {4.0, 10.0, 20.0, 1.0};
+  glm::vec4 eyePos = {4.0, 6.0, 30.0, 1.0};
 
   std::vector<Material> materials;
   std::vector<PointLight> lights;
@@ -201,7 +201,7 @@ public:
     m.diffuse *= baseColour;
     m.specular *= glm::vec4{0.2, 0.2, 0.2, 1.0};
     m.specular[3] = 1.0;
-    m.reflectivity() = 0.8;
+    m.reflectivity() = 0.3;
     materials.push_back(m);
 
     m = Material();
@@ -297,26 +297,26 @@ public:
 
     // x walls
     p = PlaneXZ();
-    p.material() = 4;
+    p.material() = 5;
     p.modelMatrix = glm::translate(p.modelMatrix, {60,0,0});
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(130.0f), glm::vec3{0.0f,0.0f,1.0f});
     primitives.push_back(p);
 
     p = PlaneXZ();
-    p.material() = 4;
+    p.material() = 5;
     p.modelMatrix = glm::translate(p.modelMatrix, {-60,0,0});
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-130.0f), glm::vec3{0.0f,0.0f,1.0f});
     primitives.push_back(p);
 
     // z walls
     p = PlaneXZ();
-    p.material() = 4;
+    p.material() = 5;
     p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, 60.0});
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(-130.0f), glm::vec3{1.0f, 0.0f, 0.0f});
     primitives.push_back(p);
 
     p = PlaneXZ();
-    p.material() = 4;
+    p.material() = 5;
     p.modelMatrix = glm::translate(p.modelMatrix, {0.0, 0.0, -60.0});
     p.modelMatrix = glm::rotate(p.modelMatrix, glm::radians(130.0f), glm::vec3{1.0f, 0.0f, 0.0f});
     primitives.push_back(p);

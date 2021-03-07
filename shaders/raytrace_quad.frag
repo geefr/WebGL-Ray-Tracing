@@ -12,8 +12,8 @@ precision highp float;
 
 // Enable features
 #define ENABLE_SHADOWS
-// #define ENABLE_REFLECTIONS
-// #define ENABLE_TRANSPARENCY
+#define ENABLE_REFLECTIONS
+#define ENABLE_TRANSPARENCY
 // TODO: Patterns need some work - Would be extended to texture support or similar
 #define ENABLE_PATTERNS
 

@@ -4,7 +4,7 @@ import Primitive from './primitive.js'
 class PlaneXZ extends Primitive {
   constructor() {
     super();
-    this.set_type(2.0);
+    this.type = 'plane_xz';
   }
 }
 

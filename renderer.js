@@ -18,6 +18,106 @@ class Renderer {
     .then((data)=>{return data});
   }
 
+  compile_shader = (shader_type, src, name) => {
+    const gl = this.gl;
+    let shader = gl.createShader(shader_type);
+    gl.shaderSource(shader, src);
+    gl.compileShader(shader);
+    if(!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error(`Shader compile failed (${name}):
+      ${src}
+      
+      ${gl.getShaderInfoLog(shader)}`);
+    }
+    return shader;
+  }
+
+  link_program = (shaders) => {
+    const gl = this.gl;
+    let program = gl.createProgram();
+    shaders.forEach(shader => {
+      gl.attachShader(program, shader);  
+    });
+    gl.linkProgram(program);
+    if(!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error(`Program Link ${gl.getProgramInfoLog(program)}`);
+    }
+    return program;
+  }
+
+  async build_frag_shader(type_dict) {
+    let fs_source = await this.fetchFile("shaders/raytrace_quad.frag");
+
+    // TODO: Loading an unknown number of default primitives will require
+    // some backend logic
+    let primitives = {
+      "sphere": await this.fetchFile("shaders/primitive_functions/sphere.frag"),
+      "plane_xz": await this.fetchFile("shaders/primitive_functions/plane_xz.frag"),
+    };
+    let all_prims = '';
+    for (var prim in primitives) {
+      all_prims += `${primitives[prim]}\n\n`;
+    }
+
+    let prim_insert = '';
+    prim_insert += `
+      // Default function definitions - Used if primitives aren't declared
+      bool is_null_type(int i) { return false; }
+      int calc_null_intersect(int i, Ray ray, out Intersection[2] intersections) { intersections[0].t = limit_inf; intersections[1].t = limit_inf; return 0; }
+      vec4 calc_null_normal(int i, vec4 p) { return vec4(0.0, 0.0, 0.0, 0.0); }
+    `;
+
+    let i = 1;
+    for (var prim in primitives) {
+      prim_insert += `
+        bool is_${prim}(int i) { return primitives[i].meta.x == float(${i}); }
+      `;
+      i++;
+    }
+    i = 1;
+    for (var prim in primitives) {
+      prim_insert += `
+        #define PRIMITIVE_${i}_TYPE is_${prim}
+        #define PRIMITIVE_${i}_INTERSECT ${prim}_intersect
+        #define PRIMITIVE_${i}_NORMAL ${prim}_normal
+      `;
+      i++
+    }
+
+    prim_insert += all_prims;
+
+    prim_insert += `int calc_primitive_intersect(int i, Ray ray, out Intersection[2] intersections) {\n`
+    i = 1;
+    for (var prim in primitives) {
+      if( i === 1 )
+      prim_insert += `if( PRIMITIVE_1_TYPE(i) ) return PRIMITIVE_1_INTERSECT(i, ray, intersections);\n`;
+      else
+      prim_insert += `else if( PRIMITIVE_${i}_TYPE(i) ) return PRIMITIVE_${i}_INTERSECT(i, ray, intersections);\n`;
+      i++;
+    }
+    prim_insert += `return calc_null_intersect(i, ray, intersections);\n}\n`;
+
+    prim_insert += `vec4 calc_primitive_normal(int i, vec4 p) {\n`
+    i = 1;
+    for (var prim in primitives) {
+      if( i === 1 )
+      prim_insert += `if( PRIMITIVE_1_TYPE(i) ) return PRIMITIVE_1_NORMAL(i, p);\n`;
+      else
+      prim_insert += `else if( PRIMITIVE_${i}_TYPE(i) ) return PRIMITIVE_${i}_NORMAL(i, p);\n`;
+      i++;
+    }
+    prim_insert += `return calc_null_normal(i, p);\n}\n`;
+
+    fs_source = fs_source.split('#primitivefunctions').join(prim_insert);
+
+    i = 1;
+    for (var prim in primitives) {
+      type_dict[prim] = i;
+      i++;
+    }
+    return fs_source;
+  }
+
   async init() {
     // Initialize the GL context
     const gl = this.canvas.getContext("webgl2", {
@@ -37,30 +137,14 @@ class Renderer {
     this.create_primitives();
 
     // Shaders
-    const fs_source = await this.fetchFile("shaders/raytrace_quad.frag");
+    let type_dict = Object();
+    const fs_source = await this.build_frag_shader(type_dict);
     const vs_source = await this.fetchFile("shaders/raytrace_quad.vert");
 
-    let vs = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vs, vs_source);
-    gl.compileShader(vs);
-    if(!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-      console.error(`Vertex Shader: ${gl.getShaderInfoLog(vs)}`);
-    }
+    let vs = this.compile_shader(gl.VERTEX_SHADER, vs_source, "Vertex Shader");
+    let fs = this.compile_shader(gl.FRAGMENT_SHADER, fs_source, "Fragment Shader");
 
-    let fs = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fs, fs_source);
-    gl.compileShader(fs);
-    if(!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-      console.error(`Fragment Shader: ${gl.getShaderInfoLog(fs)}`);
-    }
-
-    this.quad_program = gl.createProgram();
-    gl.attachShader(this.quad_program, vs);
-    gl.attachShader(this.quad_program, fs);
-    gl.linkProgram(this.quad_program);
-    if(!gl.getProgramParameter(this.quad_program, gl.LINK_STATUS)) {
-      console.error(`Program Link ${gl.getProgramInfoLog(this.quad_program)}`);
-    }
+    this.quad_program = this.link_program([vs, fs]);
     gl.useProgram(this.quad_program);
 
     // Buffers
@@ -107,7 +191,7 @@ class Renderer {
 
     this.primitives_ubo = gl.createBuffer();
     gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.primitives_ubo);
-    this.upload_ubo_0(this.quad_program_uni.ubo_primitives);
+    this.upload_ubo_0(this.quad_program_uni.ubo_primitives, type_dict);
 
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     gl.disable(gl.DEPTH_TEST);
@@ -281,7 +365,7 @@ class Renderer {
     this.primitives.push(p);
   }
 
-  upload_ubo_0 = (blockIndex) => {
+  upload_ubo_0 = (blockIndex, type_dict) => {
     // Iterate over the primitives and pack their data into
     // the UBO. Method must be called with UBO currently bound
     // to UNIFORM_BUFFER, and shader program bound.
@@ -400,6 +484,8 @@ class Renderer {
     for(let i = 0; i < num_primitives; i++) {
       let offset = primitives_offset + (i * primitive_size);
       let p = this.primitives[i];
+
+      p.set_type_number(type_dict[p.type]);
       
       data[offset++] = p.modelMatrix[0];
       data[offset++] = p.modelMatrix[1];

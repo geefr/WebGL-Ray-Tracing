@@ -8,6 +8,9 @@
 #include <stdexcept>
 #include <map>
 #include <vector>
+#include <list>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
@@ -75,8 +78,16 @@ public:
     create_primitives();
 
     // Shaders
-    const auto fs_source = loadFile("../../shaders/raytrace_quad.frag");
-    const auto vs_source = loadFile("../../shaders/raytrace_quad.vert");
+    std::string fs_source = loadFile("../../shaders/raytrace_quad.frag");
+    const std::string vs_source = loadFile("../../shaders/raytrace_quad.vert");
+    const auto primitives = load_primitive_shaders();
+    std::string all_prims;
+    for( auto& prim: primitives ) {
+      all_prims.append(prim);
+      all_prims.append("\n\n");
+    }
+    const std::string marker = "#primitivefunctions";
+    fs_source.replace(fs_source.find(marker), marker.size(), (const std::string&)all_prims);
 
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
     const char* vsc = vs_source.c_str();
@@ -84,7 +95,7 @@ public:
     glCompileShader(vs);
     GLint result = GL_FALSE;
     glGetShaderiv(vs, GL_COMPILE_STATUS, &result);
-    if( result != GL_TRUE ) throw std::runtime_error("Failed to compile vertex shader");
+    if( result != GL_TRUE ) throw std::runtime_error("Failed to compile vertex shader\n\n" + vs_source);
 
 
     GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
@@ -93,7 +104,7 @@ public:
     glCompileShader(fs);
     result = GL_FALSE;
     glGetShaderiv(fs, GL_COMPILE_STATUS, &result);
-    if( result != GL_TRUE ) throw std::runtime_error("Failed to compile fragment shader");
+    if( result != GL_TRUE ) throw std::runtime_error("Failed to compile fragment shader\n\n" + fs_source);
 
     quad_program = glCreateProgram();
     glAttachShader(quad_program, vs);
@@ -512,6 +523,14 @@ public:
     glUniform1i(quad_program_uni["iNumLights"], lights.size());
 
     glUniformMatrix4fv(quad_program_uni["viewMatrix"], 1, GL_FALSE, glm::value_ptr(viewMatrix));
+  }
+
+  std::list<std::string> load_primitive_shaders() {
+    std::list<std::string> results;
+    for(auto& p: fs::directory_iterator("../../shaders/primitive_functions")) {
+      results.push_back(loadFile(p.path()));
+    }
+    return results;
   }
 };
 

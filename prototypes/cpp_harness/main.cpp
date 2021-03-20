@@ -44,6 +44,135 @@ std::string loadFile(const std::string &path)
   return ss.str();
 }
 
+GLuint compileShader(GLenum shaderType, std::string src) {
+    GLuint shader = glCreateShader(shaderType);
+    const char* vsc = src.c_str();
+    glShaderSource(shader, 1, &vsc, NULL);
+    glCompileShader(shader);
+    GLint result = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &result);
+    if( result != GL_TRUE ) {
+      //Note: maxLength includes the NUL terminator.
+      GLint maxLength = 0;
+      glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &maxLength);
+
+      //C++11 does not permit you to overwrite the NUL terminator,
+      //even if you are overwriting it with the NUL terminator.
+      //C++17 does, so you could subtract 1 from the length and skip the `pop_back`.
+      std::basic_string<GLchar> infoLog(maxLength, '\0');
+      glGetShaderInfoLog(shader, maxLength, &maxLength, &infoLog[0]);
+      infoLog.pop_back();
+
+      //Use the infoLog in whatever manner you deem best.
+      throw std::runtime_error(
+        "Failed to compile shader: \n" + 
+        src + "\n\n" +
+        infoLog + "\n");
+    }
+    return shader;
+}
+
+template<typename Iterable>
+GLuint linkProgram(const Iterable& shaders) {
+  GLuint program = glCreateProgram();
+  for( const auto& s : shaders ) glAttachShader(program, s);
+  glLinkProgram(program);
+  GLint result = GL_FALSE;
+  glGetProgramiv(program, GL_LINK_STATUS, &result);
+  if( result != GL_TRUE ) {
+    //Note: maxLength includes the NUL terminator.
+    GLint maxLength = 0;
+    glGetProgramiv(program, GL_INFO_LOG_LENGTH, &maxLength);        
+
+    //C++11 does not permit you to overwrite the NUL terminator,
+    //even if you are overwriting it with the NUL terminator.
+    //C++17 does, so you could subtract 1 from the length and skip the `pop_back`.
+    std::basic_string<GLchar> infoLog(maxLength, '\0');
+    glGetProgramInfoLog(program, maxLength, &maxLength, &infoLog[0]);
+    infoLog.pop_back();
+
+    //Use the infoLog in whatever manner you deem best.
+    throw std::runtime_error("Failed to link shader: " + infoLog);
+  }
+  return program;
+}
+
+auto load_primitive_shaders(std::string primitiveDir) {
+  std::list<std::pair<std::string, std::string>> results;
+  for(auto& p: fs::directory_iterator(primitiveDir)) {
+    results.push_back(std::make_pair( p.path().stem(), loadFile(p.path() )));
+  }
+  return results;
+}
+
+std::string buildFragShader(std::string shaderDir, std::map<std::string, float>& typeMap) {
+    std::string fs_source = loadFile(shaderDir + "/raytrace_quad.frag");
+    const auto primitives = load_primitive_shaders(shaderDir + "/primitive_functions");
+    std::string all_prims;
+    for( auto& prim: primitives ) {
+      all_prims.append(prim.second);
+      all_prims.append("\n\n");
+    }
+
+    std::stringstream primInsert;
+    primInsert << R"(
+      // Default function definitions - Used if primitives aren't declared
+      bool is_null_type(int i) { return false; }
+      int calc_null_intersect(int i, Ray ray, out Intersection[2] intersections) { intersections[0].t = limit_inf; intersections[1].t = limit_inf; return 0; }
+      vec4 calc_null_normal(int i, vec4 p) { return vec4(0.0, 0.0, 0.0, 0.0); }
+    )";
+
+    auto i = 1u;
+    for( auto& prim: primitives ) {
+      primInsert << "bool is_" << prim.first << "(int i) { return primitives[i].meta.x == float(" << i << "); }\n";
+      ++i;
+    }
+
+    i = 1u;
+    for( auto& prim: primitives ) {
+      primInsert << 
+      "#define PRIMITIVE_" << i << "_TYPE " << "is_" << prim.first << "\n" <<
+      "#define PRIMITIVE_" << i << "_INTERSECT " << prim.first << "_intersect" << "\n" <<
+      "#define PRIMITIVE_" << i << "_NORMAL " << prim.first << "_normal" << "\n";
+      ++i;
+    }
+
+    primInsert << all_prims;
+
+    primInsert << "int calc_primitive_intersect(int i, Ray ray, out Intersection[2] intersections) {\n";
+    i = 1u;
+    for( auto& prim: primitives ) {
+      if( i == 1 )
+        primInsert << "if( PRIMITIVE_1_TYPE(i) ) return PRIMITIVE_1_INTERSECT(i, ray, intersections);\n";
+      else
+        primInsert << "else if( PRIMITIVE_" << i << "_TYPE(i) ) return PRIMITIVE_" << i << "_INTERSECT(i, ray, intersections);\n";
+      ++i;
+    }
+    primInsert << "return calc_null_intersect(i, ray, intersections);\n}\n";
+
+    primInsert << "vec4 calc_primitive_normal(int i, vec4 p) {\n";
+    i = 1u;
+    for( auto& prim: primitives ) {
+      if( i == 1 )
+        primInsert << "if( PRIMITIVE_1_TYPE(i) ) return PRIMITIVE_1_NORMAL(i, p);\n";
+      else
+        primInsert << "else if( PRIMITIVE_" << i << "_TYPE(i) ) return PRIMITIVE_" << i << "_NORMAL(i, p);\n";
+      ++i;
+    }
+    primInsert << "return calc_null_normal(i, p);\n}\n";
+
+    const std::string marker = "#primitivefunctions";
+    fs_source.replace(fs_source.find(marker), marker.size(), (const std::string&)primInsert.str());
+
+    i = 1u;
+    for( auto& prim: primitives ) {
+      typeMap[prim.first] = static_cast<float>(i);
+      ++i;
+    }
+
+    return fs_source;
+}
+
 class Renderer
 {
 public:
@@ -78,54 +207,14 @@ public:
     create_primitives();
 
     // Shaders
-    std::string fs_source = loadFile("../../shaders/raytrace_quad.frag");
     const std::string vs_source = loadFile("../../shaders/raytrace_quad.vert");
-    const auto primitives = load_primitive_shaders();
-    std::string all_prims;
-    for( auto& prim: primitives ) {
-      all_prims.append(prim);
-      all_prims.append("\n\n");
-    }
-    const std::string marker = "#primitivefunctions";
-    fs_source.replace(fs_source.find(marker), marker.size(), (const std::string&)all_prims);
+    std::map<std::string, float> typeMap;
+    auto fs_source = buildFragShader("../../shaders/", typeMap);
 
-    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-    const char* vsc = vs_source.c_str();
-    glShaderSource(vs, 1, &vsc, NULL);
-    glCompileShader(vs);
-    GLint result = GL_FALSE;
-    glGetShaderiv(vs, GL_COMPILE_STATUS, &result);
-    if( result != GL_TRUE ) throw std::runtime_error("Failed to compile vertex shader\n\n" + vs_source);
+    auto vs = compileShader(GL_VERTEX_SHADER, vs_source);
+    auto fs = compileShader(GL_FRAGMENT_SHADER, fs_source);
 
-
-    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-    const char* fsc = fs_source.c_str();
-    glShaderSource(fs, 1, &fsc, NULL);
-    glCompileShader(fs);
-    result = GL_FALSE;
-    glGetShaderiv(fs, GL_COMPILE_STATUS, &result);
-    if( result != GL_TRUE ) throw std::runtime_error("Failed to compile fragment shader\n\n" + fs_source);
-
-    quad_program = glCreateProgram();
-    glAttachShader(quad_program, vs);
-    glAttachShader(quad_program, fs);
-    glLinkProgram(quad_program);
-    glGetProgramiv(quad_program, GL_LINK_STATUS, &result);
-    if( result != GL_TRUE ) {
-      //Note: maxLength includes the NUL terminator.
-      GLint maxLength = 0;
-      glGetProgramiv(quad_program, GL_INFO_LOG_LENGTH, &maxLength);        
-
-      //C++11 does not permit you to overwrite the NUL terminator,
-      //even if you are overwriting it with the NUL terminator.
-      //C++17 does, so you could subtract 1 from the length and skip the `pop_back`.
-      std::basic_string<GLchar> infoLog(maxLength, '\0');
-      glGetProgramInfoLog(quad_program, maxLength, &maxLength, &infoLog[0]);
-      infoLog.pop_back();
-
-      //Use the infoLog in whatever manner you deem best.
-      throw std::runtime_error("Failed to link shader: " + infoLog);
-    }
+    quad_program = linkProgram(std::list<GLuint>{vs, fs});
     glUseProgram(quad_program);
 
     glCreateVertexArrays(1, &quad_vao);
@@ -170,7 +259,7 @@ public:
       {"ubo_0", glGetUniformBlockIndex(quad_program, "ubo_0")}
     };
 
-    upload_ubo_0(quad_program_uni["ubo_0"]);
+    upload_ubo_0(quad_program_uni["ubo_0"], typeMap);
 
     // Minor thing, but we don't need depth testing for full-screen ray tracing
     // glDisable(GL_DEPTH_TEST);
@@ -339,7 +428,7 @@ public:
     // primitives.push_back(p);
   }
 
-  void upload_ubo_0(GLint ubo_index) {
+  void upload_ubo_0(GLint ubo_index, std::map<std::string, float> typeMap ) {
     // Get the buffer size + offsets
     GLint ubo_size = 0;
     glGetActiveUniformBlockiv(quad_program, ubo_index, GL_UNIFORM_BLOCK_DATA_SIZE, &ubo_size);
@@ -434,6 +523,8 @@ public:
       auto offset = primitives_offset + (i * primitive_size);
       auto& p = primitives[i];
 
+      p.type_number() = typeMap[p.type];
+
       data[offset++] = p.modelMatrix[0][0];
       data[offset++] = p.modelMatrix[0][1];
       data[offset++] = p.modelMatrix[0][2];
@@ -523,14 +614,6 @@ public:
     glUniform1i(quad_program_uni["iNumLights"], lights.size());
 
     glUniformMatrix4fv(quad_program_uni["viewMatrix"], 1, GL_FALSE, glm::value_ptr(viewMatrix));
-  }
-
-  std::list<std::string> load_primitive_shaders() {
-    std::list<std::string> results;
-    for(auto& p: fs::directory_iterator("../../shaders/primitive_functions")) {
-      results.push_back(loadFile(p.path()));
-    }
-    return results;
   }
 };
 

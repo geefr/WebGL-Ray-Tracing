@@ -1,10 +1,5 @@
 
-// Map type == 1.0 to sphere functions
-#define PRIMITIVE_1_TYPE is_sphere
-#define PRIMITIVE_1_INTERSECT sphere_intersect
-#define PRIMITIVE_1_NORMAL sphere_normal
 
-bool is_sphere(int i) { return primitives[i].meta.x == 1.0; }
 
 // Intersection of ray with the sphere at primitives[i]
 // - ray: A ray in world space (oh rayray, mommy misses you D:)

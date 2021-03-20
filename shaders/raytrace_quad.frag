@@ -166,44 +166,6 @@ vec4 primitive_pattern(int i, vec4 c, vec2 uv) {
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Include primitive_functions/*.frag
-// TODO: For now this bit is hardcoded - Should be generated on the fly based on available primitives
-#define PRIMITIVE_TYPE_MAX 10
-// Default function definitions - Used if primitives aren't declared
-bool is_null_type(int i) { return false; }
-//#define PRIMITIVE_1_TYPE is_null_type
-//#define PRIMITIVE_2_TYPE is_null_type
-#define PRIMITIVE_3_TYPE is_null_type
-#define PRIMITIVE_4_TYPE is_null_type
-#define PRIMITIVE_5_TYPE is_null_type
-#define PRIMITIVE_6_TYPE is_null_type
-#define PRIMITIVE_7_TYPE is_null_type
-#define PRIMITIVE_8_TYPE is_null_type
-#define PRIMITIVE_9_TYPE is_null_type
-#define PRIMITIVE_10_TYPE is_null_type
-
-int calc_null_intersect(int i, Ray ray, out Intersection[2] intersections) { intersections[0].t = limit_inf; intersections[1].t = limit_inf; return 0; }
-//#define PRIMITIVE_1_INTERSECT calc_null_intersect
-//#define PRIMITIVE_2_INTERSECT calc_null_intersect
-#define PRIMITIVE_3_INTERSECT calc_null_intersect
-#define PRIMITIVE_4_INTERSECT calc_null_intersect
-#define PRIMITIVE_5_INTERSECT calc_null_intersect
-#define PRIMITIVE_6_INTERSECT calc_null_intersect
-#define PRIMITIVE_7_INTERSECT calc_null_intersect
-#define PRIMITIVE_8_INTERSECT calc_null_intersect
-#define PRIMITIVE_9_INTERSECT calc_null_intersect
-#define PRIMITIVE_10_INTERSECT calc_null_intersect
-
-vec4 calc_null_normal(int i, vec4 p) { return vec4(0.0, 0.0, 0.0, 0.0); }
-//#define PRIMITIVE_1_NORMAL calc_null_normal
-//#define PRIMITIVE_2_NORMAL calc_null_normal
-#define PRIMITIVE_3_NORMAL calc_null_normal
-#define PRIMITIVE_4_NORMAL calc_null_normal
-#define PRIMITIVE_5_NORMAL calc_null_normal
-#define PRIMITIVE_6_NORMAL calc_null_normal
-#define PRIMITIVE_7_NORMAL calc_null_normal
-#define PRIMITIVE_8_NORMAL calc_null_normal
-#define PRIMITIVE_9_NORMAL calc_null_normal
-#define PRIMITIVE_10_NORMAL calc_null_normal
 
 // Include primitive_functions/*.frag
 // Each file must contain to following, where N is a unique int, up to PRIMITIVE_TYPE_MAX
@@ -212,35 +174,6 @@ vec4 calc_null_normal(int i, vec4 p) { return vec4(0.0, 0.0, 0.0, 0.0); }
 // - int somename_intersect(int i, Ray ray, out Intersection[2] intersections)
 // - vec4 somename_normal(int i, vec4 p)
 #primitivefunctions
-
-
-int calc_primitive_intersect(int i, Ray ray, out Intersection[2] intersections) {
-  if( PRIMITIVE_1_TYPE(i) ) return PRIMITIVE_1_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_2_TYPE(i) ) return PRIMITIVE_2_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_3_TYPE(i) ) return PRIMITIVE_3_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_4_TYPE(i) ) return PRIMITIVE_4_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_5_TYPE(i) ) return PRIMITIVE_5_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_6_TYPE(i) ) return PRIMITIVE_6_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_7_TYPE(i) ) return PRIMITIVE_7_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_8_TYPE(i) ) return PRIMITIVE_8_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_9_TYPE(i) ) return PRIMITIVE_9_INTERSECT(i, ray, intersections);
-  else if( PRIMITIVE_10_TYPE(i) ) return PRIMITIVE_10_INTERSECT(i, ray, intersections);
-  return calc_null_intersect(i, ray, intersections);
-}
-
-vec4 calc_primitive_normal(int i, vec4 p) {
-  if( PRIMITIVE_1_TYPE(i) ) return PRIMITIVE_1_NORMAL(i, p);
-  else if( PRIMITIVE_2_TYPE(i) ) return PRIMITIVE_2_NORMAL(i, p);
-  else if( PRIMITIVE_3_TYPE(i) ) return PRIMITIVE_3_NORMAL(i, p);
-  else if( PRIMITIVE_4_TYPE(i) ) return PRIMITIVE_4_NORMAL(i, p);
-  else if( PRIMITIVE_5_TYPE(i) ) return PRIMITIVE_5_NORMAL(i, p);
-  else if( PRIMITIVE_6_TYPE(i) ) return PRIMITIVE_6_NORMAL(i, p);
-  else if( PRIMITIVE_7_TYPE(i) ) return PRIMITIVE_7_NORMAL(i, p);
-  else if( PRIMITIVE_8_TYPE(i) ) return PRIMITIVE_8_NORMAL(i, p);
-  else if( PRIMITIVE_9_TYPE(i) ) return PRIMITIVE_9_NORMAL(i, p);
-  else if( PRIMITIVE_10_TYPE(i) ) return PRIMITIVE_10_NORMAL(i, p);
-  return calc_null_normal(i, p);
-}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 // Calculation of intersection vectors

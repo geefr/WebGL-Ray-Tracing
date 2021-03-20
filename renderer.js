@@ -23,7 +23,7 @@ class Renderer {
     const gl = this.canvas.getContext("webgl2", {
       antialias: false, // This may be a dumb idea for ray tracing :)
       powerPreference: "high-performance",
-      failIfMajorPerformanceCaveat: true,
+      failIfMajorPerformanceCaveat: false,
       desynchronized: true
     });
     this.gl = gl;
